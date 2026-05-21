@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 🏷️ Auction System - Monorepo
 
 A modern online auction platform built with React, Node.js, Express, and MySQL. This is a monorepo structure using pnpm workspaces for managing backend and frontend packages.
@@ -222,3 +223,6 @@ Private project - All rights reserved
 ---
 
 **Built with ❤️**
+=======
+# auction-feature
+>>>>>>> a3a26c68539a1a2675fd3644ed6370afdbf61a87
