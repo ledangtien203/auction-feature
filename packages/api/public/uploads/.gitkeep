@@ -1,0 +1,5 @@
+# Uploads Directory
+
+This directory stores uploaded images for auctions.
+
+**Note:** This directory is git-ignored. Configure your web server to serve this folder.

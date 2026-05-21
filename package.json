@@ -1,0 +1,43 @@
+{
+  "name": "@auction/root",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Auction system - monorepo",
+  "scripts": {
+    "dev": "concurrently -k \"npm -w @auction/api run dev\" \"npm -w @auction/web run dev\"",
+    "dev:api": "npm -w @auction/api run dev",
+    "dev:web": "npm -w @auction/web run dev",
+    "build": "npm -w @auction/web run build",
+    "build:api": "npm -w @auction/api run build",
+    "seed": "npm -w @auction/api run seed",
+    "lint": "npm -w @auction/web run lint",
+    "test": "echo \"No tests configured\" && exit 0"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "devDependencies": {
+    "@types/node": "^25.7.0",
+    "@types/react": "^19.2.14",
+    "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@radix-ui/react-scroll-area": "^1.2.10",
+    "@radix-ui/react-slot": "^1.2.4",
+    "axios": "^1.16.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.2",
+    "jsonwebtoken": "^9.0.3",
+    "lucide-react": "^1.16.0",
+    "mysql2": "^3.22.3",
+    "openai": "^6.37.0",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
+    "tailwind-merge": "^2.6.1"
+  }
+}
