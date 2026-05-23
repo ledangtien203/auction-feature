@@ -11,8 +11,12 @@ import { readStoredUser } from '../services/authService';
 interface WonAuction extends Auction {
   winningBid?: {
     id: string;
-    amount: number;
-    createdAt: string;
+    auctionId: string;
+    userId: string;
+    userName: string | null;
+    bidAmount: number;
+    bidTime: string;
+    createdAt?: string;
   };
   transactionStatus?: string;
   paymentMethod?: string;
@@ -275,22 +279,22 @@ export function WonAuctions() {
                         <div>
                           <div className="text-xs text-muted-foreground mb-1">Giá thắng</div>
                           <div className="text-xl font-bold text-success">
-                            {formatCurrency(auction.currentBid)}
+                            {formatCurrency(auction.winningBid?.bidAmount ?? auction.currentPrice)}
                           </div>
                         </div>
 
-                        {auction.winningBid && (
+                        {auction.winningBid?.bidTime && (
                           <div>
                             <div className="text-xs text-muted-foreground mb-1">Ngày thắng</div>
                             <div className="text-sm font-medium">
-                              {formatTimestamp(auction.winningBid.createdAt)}
+                              {formatTimestamp(auction.winningBid.bidTime)}
                             </div>
                           </div>
                         )}
 
                         <div>
                           <div className="text-xs text-muted-foreground mb-1">Người bán</div>
-                          <div className="text-sm font-medium">{auction.seller}</div>
+                          <div className="text-sm font-medium">{auction.seller || '—'}</div>
                         </div>
 
                         {auction.paymentMethod && (

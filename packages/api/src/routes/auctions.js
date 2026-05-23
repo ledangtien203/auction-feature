@@ -6,6 +6,7 @@ const router = Router();
 router.get('/', auctionController.getAll);
 router.get('/featured', auctionController.getFeatured);
 router.get('/trending', auctionController.getTrending);
+router.get('/new', auctionController.getNew);
 router.get('/:id', auctionController.getById);
 router.get('/:id/bids', auctionController.getBidHistory);
 

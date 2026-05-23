@@ -12,22 +12,20 @@ export function AdminGuard({ children }: AdminGuardProps) {
 
   useEffect(() => {
     if (!user) {
-      // Chưa đăng nhập, chuyển về login
       navigate('/login', { replace: true });
       return;
     }
 
-    if (user.role !== 'admin') {
-      // Không phải admin, chuyển về trang chủ
+    const role = user.role?.toLowerCase();
+    if (role !== 'admin') {
       navigate('/', { replace: true });
       return;
     }
   }, [user, navigate]);
 
-  // Nếu không phải admin hoặc chưa đăng nhập, không render gì
-  if (!user || user.role !== 'admin') {
-    return null;
-  }
+  if (!user) return null;
+  const role = user.role?.toLowerCase();
+  if (role !== 'admin') return null;
 
   return <>{children}</>;
 }

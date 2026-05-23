@@ -6,11 +6,18 @@ async function getAiReply(message) {
   const text = message.toLowerCase();
 
   if (text.includes('giá') || text.includes('bao nhiêu tiền')) {
-    const [rows] = await pool.query('SELECT title, current_bid FROM auctions');
-    const found = rows.find((item) => text.includes(item.title.toLowerCase()));
+    const [rows] = await pool.query(
+      `SELECT p.title, a.current_price
+       FROM auction a
+       JOIN product p ON p.id = a.product_id
+       WHERE a.status_id = 1`
+    );
+    const found = rows.find((item) =>
+      item.title && text.includes(item.title.toLowerCase())
+    );
 
     if (found) {
-      return `Sản phẩm ${found.title} hiện đang được đấu giá ở mức ${Number(found.current_bid).toLocaleString('vi-VN')} VNĐ.`;
+      return `Sản phẩm ${found.title} hiện đang được đấu giá ở mức ${Number(found.current_price).toLocaleString('vi-VN')} VNĐ.`;
     }
 
     return 'Không tìm thấy sản phẩm bạn hỏi.';
@@ -20,26 +27,22 @@ async function getAiReply(message) {
     (text.includes('bao nhiêu') || text.includes('bao nhieu')) &&
     (text.includes('sản phẩm') || text.includes('san pham'))
   ) {
-    const [rows] = await pool.query('SELECT COUNT(*) AS total FROM auctions');
-    return `Hiện có ${rows[0].total} sản phẩm trên hệ thống đấu giá.`;
+    const [rows] = await pool.query(
+      'SELECT COUNT(*) AS total FROM auction WHERE status_id = 1'
+    );
+    return `Hiện có ${rows[0].total} sản phẩm đang đấu giá trên hệ thống.`;
   }
 
   if (text.includes('sản phẩm gì') || text.includes('có gì')) {
-    const [rows] = await pool.query('SELECT title FROM auctions LIMIT 5');
+    const [rows] = await pool.query(
+      `SELECT p.title FROM auction a
+       JOIN product p ON p.id = a.product_id
+       WHERE a.status_id = 1
+       LIMIT 5`
+    );
+    if (rows.length === 0) return 'Hiện chưa có sản phẩm nào đang đấu giá.';
     const names = rows.map((item) => item.title).join(', ');
     return `Một số sản phẩm đang đấu giá: ${names}.`;
-  }
-
-  const [knowledgeRows] = await pool.query(
-    `SELECT answer FROM chatbot_knowledge
-     WHERE is_active = 1 AND ? LIKE CONCAT('%', keyword, '%')
-     ORDER BY priority DESC
-     LIMIT 1`,
-    [text]
-  );
-
-  if (knowledgeRows.length > 0) {
-    return knowledgeRows[0].answer;
   }
 
   return null;
@@ -55,7 +58,7 @@ export const aiController = {
       }
 
       const reply = await getAiReply(message.trim());
-      res.json({ reply });
+      res.json({ reply: reply || 'Xin lỗi, tôi chưa hiểu câu hỏi của bạn. Bạn có thể hỏi về sản phẩm đang đấu giá.' });
     } catch (error) {
       next(error);
     }

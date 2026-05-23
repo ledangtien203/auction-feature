@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { User } from '../types/user';
 import { authService, clearAuth, persistAuth, readStoredUser } from '../services/authService';
+import { joinUser } from '../lib/socket';
 
 interface LoginCredentials {
   email: string;
@@ -39,6 +40,8 @@ export const useAuth = (): UseAuthReturn => {
       .then((u) => {
         setUser(u);
         sessionStorage.setItem('user', JSON.stringify(u));
+        // Join user's personal socket room for notifications
+        joinUser(u.id);
       })
       .catch(() => {
         clearAuth();
@@ -62,6 +65,8 @@ export const useAuth = (): UseAuthReturn => {
       const { token, user: u } = await authService.login(credentials.email, credentials.password);
       persistAuth(token, u);
       setUser(u);
+      // Join user's personal socket room for notifications
+      joinUser(u.id);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Đăng nhập thất bại';
       setError(errorMessage);

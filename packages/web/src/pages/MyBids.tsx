@@ -186,7 +186,7 @@ export function MyBids() {
                           <div>
                             <div className="text-xs text-muted-foreground mb-1">Giá hiện tại</div>
                             <div className="text-xl font-bold">
-                              {formatCurrency(auction.currentBid)}
+                              {formatCurrency(auction.currentPrice)}
                             </div>
                           </div>
                           <div>

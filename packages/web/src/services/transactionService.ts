@@ -9,6 +9,11 @@ export const transactionService = {
     return rows.map(parseTransaction);
   },
 
+  async getWonAuctions(): Promise<any[]> {
+    const rows = await api<any[]>('/api/bids/won');
+    return rows;
+  },
+
   async updateTransactionStatus(
     id: string,
     status: 'completed' | 'cancelled'
@@ -30,7 +35,7 @@ export interface DashboardPayload {
   userGrowth: number;
   auctionGrowth: number;
   recentAuctions: Record<string, unknown>[];
-  recentTransactions: Record<string, unknown>[];
+  newUsers: Record<string, unknown>[];
 }
 
 export const adminDashboardService = {
@@ -43,13 +48,33 @@ export const adminDashboardService = {
     userGrowth: number;
     auctionGrowth: number;
     recentAuctions: Auction[];
-    recentTransactions: Transaction[];
+    newUsers: Array<{
+      id: string;
+      username: string;
+      email: string;
+      name: string | null;
+      createdAt: string;
+      isVerified: boolean;
+      rating: number;
+    }>;
   }> {
     const raw = await api<DashboardPayload>('/api/admin/dashboard');
     return {
       ...raw,
       recentAuctions: raw.recentAuctions.map(parseAuction),
-      recentTransactions: raw.recentTransactions.map(parseTransaction),
+      newUsers: raw.newUsers as any,
     };
+  },
+
+  async getRevenueChart(): Promise<Array<{ month: string; revenue: number; auctions: number }>> {
+    return api('/api/admin/dashboard/charts/revenue');
+  },
+
+  async getCategoriesChart(): Promise<Array<{ name: string; value: number; color: string }>> {
+    return api('/api/admin/dashboard/charts/categories');
+  },
+
+  async getActivityChart(): Promise<Array<{ hour: string; bids: number }>> {
+    return api('/api/admin/dashboard/charts/activity');
   },
 };

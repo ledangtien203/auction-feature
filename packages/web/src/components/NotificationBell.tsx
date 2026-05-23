@@ -1,159 +1,227 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Bell, Trophy, AlertCircle } from 'lucide-react';
+import { Bell, Trophy, TrendingUp, Clock } from 'lucide-react';
 import { Button } from './ui/button';
-import { Badge } from './ui/badge';
-import {
-  notificationService,
-  type Notification,
-} from '../services/notificationService';
 import { readStoredUser } from '../services/authService';
+import { notificationService } from '../services/notificationService';
 import { onUserNotification, joinUser } from '../lib/socket';
+import { toast } from 'sonner';
+
+interface Notification {
+  id: string;
+  userId: string;
+  auctionId: string | null;
+  title: string;
+  message: string | null;
+  isRead: boolean;
+  createdAt: string;
+}
 
 export function NotificationBell() {
   const user = readStoredUser();
-  const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<Notification[]>([]);
-  const [unread, setUnread] = useState(0);
-  const [loading, setLoading] = useState(false);
-
-  const refresh = useCallback(async () => {
-    if (!user) return;
-    try {
-      const [list, count] = await Promise.all([
-        notificationService.getMyNotifications(),
-        notificationService.getUnreadCount(),
-      ]);
-      setItems(list);
-      setUnread(count);
-    } catch {
-      setItems([]);
-      setUnread(0);
-    }
-  }, [user]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!user) return;
+    // Join user room to receive notifications
+    if (user.id) {
+      joinUser(user.id);
+    }
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 15000);
+    return () => clearInterval(interval);
+  }, [user]);
 
-    // Join user-specific room for real-time notifications
-    joinUser(user.id);
-    refresh();
-
-    const t = setInterval(refresh, 60_000);
-    const off = onUserNotification((payload) => {
-      if (payload.userId === Number(user?.id) || String(payload.userId) === user?.id) {
-        refresh();
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
       }
-    });
-    return () => {
-      clearInterval(t);
-      off();
     };
-  }, [refresh, user?.id]);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onUserNotification((data) => {
+      if (data.type === 'outbid') {
+        toast.warning('Bạn đã bị vượt giá!', {
+          description: 'Có người đặt giá cao hơn bạn. Hãy đặt lại để giành chiến thắng!',
+          duration: 5000,
+        });
+      } else if (data.type === 'won') {
+        toast.success('Chúc mừng bạn đã thắng đấu giá!', {
+          description: 'Vui lòng thanh toán để nhận sản phẩm.',
+          duration: 5000,
+        });
+      } else if (data.type === 'auction_ended') {
+        toast.info('Phiên đấu giá đã kết thúc', {
+          description: 'Xem kết quả trong thông báo.',
+          duration: 5000,
+        });
+      }
+      fetchNotifications();
+    });
+    return unsubscribe;
+  }, []);
+
+  const fetchNotifications = async () => {
+    try {
+      const data = await notificationService.getMyNotifications();
+      setNotifications(data);
+      setUnreadCount(data.filter((n) => !n.isRead).length);
+    } catch (e) {
+      console.error('Failed to fetch notifications', e);
+    }
+  };
+
+  const markAsRead = async (id: string) => {
+    try {
+      await notificationService.markAsRead(id);
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
+      );
+      setUnreadCount((prev) => Math.max(0, prev - 1));
+    } catch (e) {
+      console.error('Failed to mark as read', e);
+    }
+  };
+
+  const markAllAsRead = async () => {
+    try {
+      await notificationService.markAllAsRead();
+      setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      setUnreadCount(0);
+      toast.success('Đã đánh dấu tất cả là đã đọc');
+    } catch (e) {
+      console.error('Failed to mark all as read', e);
+    }
+  };
+
+  const formatTime = (iso: string) => {
+    const d = new Date(iso);
+    const diff = Date.now() - d.getTime();
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return 'Vừa xong';
+    if (m < 60) return `${m} phút trước`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h} giờ trước`;
+    return d.toLocaleDateString('vi-VN');
+  };
+
+  const getNotificationIcon = (title: string) => {
+    const lower = title.toLowerCase();
+    if (lower.includes('thắng') || lower.includes('win') || lower.includes('won')) {
+      return <Trophy className="h-4 w-4 text-yellow-500" />;
+    }
+    if (lower.includes('vượt') || lower.includes('outbid') || lower.includes('bị')) {
+      return <TrendingUp className="h-4 w-4 text-red-500" />;
+    }
+    return <Bell className="h-4 w-4 text-blue-500" />;
+  };
 
   if (!user) return null;
 
-  const handleOpen = async () => {
-    const next = !open;
-    setOpen(next);
-    if (next) {
-      setLoading(true);
-      await refresh();
-      setLoading(false);
-    }
-  };
-
-  const handleMarkRead = async (n: Notification) => {
-    if (!n.isRead) {
-      await notificationService.markAsRead(n.id);
-      await refresh();
-    }
-  };
-
   return (
-    <div className="relative">
+    <div className="relative" ref={dropdownRef}>
       <Button
         variant="ghost"
         size="icon"
-        className="h-9 w-9 relative"
-        onClick={handleOpen}
-        aria-label="Thông báo"
+        className="relative h-9 w-9 rounded-full"
+        onClick={() => setIsOpen(!isOpen)}
       >
-        <Bell className="h-4 w-4" />
-        {unread > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 h-4 min-w-4 px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold flex items-center justify-center">
-            {unread > 9 ? '9+' : unread}
+        <Bell className="h-5 w-5" />
+        {unreadCount > 0 && (
+          <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+            {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
       </Button>
 
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden />
-          <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 bg-card border border-border rounded-xl shadow-lg z-50 overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <span className="font-semibold">Thông báo</span>
-              {unread > 0 && (
-                <button
-                  type="button"
-                  className="text-xs text-accent hover:underline"
-                  onClick={async () => {
-                    await notificationService.markAllAsRead();
-                    await refresh();
+      {isOpen && (
+        <div className="absolute right-0 top-full mt-2 w-80 bg-card border border-border rounded-xl shadow-lg z-50 overflow-hidden">
+          <div className="flex items-center justify-between p-4 border-b border-border">
+            <h3 className="font-semibold">Thông báo</h3>
+            {unreadCount > 0 && (
+              <Button variant="ghost" size="sm" onClick={markAllAsRead} className="text-xs h-auto py-1 px-2">
+                Đánh dấu đã đọc
+              </Button>
+            )}
+          </div>
+
+          <div className="max-h-96 overflow-y-auto">
+            {notifications.length === 0 ? (
+              <div className="p-8 text-center text-muted-foreground">
+                <Bell className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">Chưa có thông báo nào</p>
+              </div>
+            ) : (
+              notifications.slice(0, 10).map((notification) => (
+                <div
+                  key={notification.id}
+                  className={`relative p-4 hover:bg-accent/50 transition-colors cursor-pointer ${
+                    !notification.isRead ? 'bg-accent/10' : ''
+                  }`}
+                  onClick={() => {
+                    if (!notification.isRead) markAsRead(notification.id);
                   }}
                 >
-                  Đánh dấu đã đọc
-                </button>
-              )}
-            </div>
-            <div className="max-h-80 overflow-y-auto">
-              {loading ? (
-                <p className="p-4 text-sm text-muted-foreground text-center">Đang tải…</p>
-              ) : items.length === 0 ? (
-                <p className="p-4 text-sm text-muted-foreground text-center">Chưa có thông báo</p>
-              ) : (
-                items.map((n) => (
-                  <button
-                    key={n.id}
-                    type="button"
-                    className={`w-full text-left px-4 py-3 border-b border-border last:border-0 hover:bg-muted/50 transition-colors ${
-                      !n.isRead ? 'bg-accent/5' : ''
-                    }`}
-                    onClick={() => handleMarkRead(n)}
-                  >
-                    <div className="flex gap-2 items-start">
-                      {n.type === 'won' && (
-                        <Trophy className="h-4 w-4 text-accent shrink-0 mt-0.5" />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium truncate">{n.title}</p>
-                          {!n.isRead && (
-                            <Badge variant="secondary" className="text-[10px] shrink-0">
-                              Mới
-                            </Badge>
-                          )}
-                        </div>
+                  <div className="flex gap-3">
+                    <div className="flex-shrink-0 mt-1">
+                      {getNotificationIcon(notification.title)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">{notification.title}</p>
+                      {notification.message && (
                         <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                          {n.message}
+                          {notification.message}
                         </p>
-                        {n.auctionId && (
-                          <Link
-                            to={`/auctions/${n.auctionId}`}
-                            className="text-xs text-accent hover:underline mt-1 inline-block"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            Xem phiên đấu giá
-                          </Link>
-                        )}
+                      )}
+                      <div className="flex items-center gap-1 mt-2">
+                        <Clock className="h-3 w-3 text-muted-foreground" />
+                        <span className="text-[10px] text-muted-foreground">
+                          {formatTime(notification.createdAt)}
+                        </span>
                       </div>
                     </div>
-                  </button>
-                ))
-              )}
-            </div>
+                    {!notification.isRead && (
+                      <div className="absolute top-4 right-4">
+                        <span className="h-2 w-2 rounded-full bg-primary block" />
+                      </div>
+                    )}
+                  </div>
+                  {notification.auctionId && (
+                    <Link
+                      to={`/auctions/${notification.auctionId}`}
+                      className="block mt-2 text-xs text-primary hover:underline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsOpen(false);
+                      }}
+                    >
+                      Xem chi tiết
+                    </Link>
+                  )}
+                </div>
+              ))
+            )}
           </div>
-        </>
+
+          {notifications.length > 10 && (
+            <div className="p-3 border-t border-border text-center">
+              <Link
+                to="/notifications"
+                className="text-sm text-primary hover:underline"
+                onClick={() => setIsOpen(false)}
+              >
+                Xem tất cả thông báo
+              </Link>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

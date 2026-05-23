@@ -19,7 +19,8 @@ export function authRequired(req, res, next) {
 }
 
 export function adminRequired(req, res, next) {
-  if (req.user?.role !== 'admin') {
+  const role = req.user?.role;
+  if (role !== 'admin' && role !== 'Admin') {
     return res.status(403).json({ message: 'Chỉ quản trị viên mới được truy cập' });
   }
   next();

@@ -21,20 +21,7 @@ export const ROUTES = {
   },
 } as const;
 
-export const AUCTION_CATEGORIES = [
-  'Đồng hồ',
-  'Máy ảnh',
-  'Nội thất',
-  'Trang sức',
-  'Xe cổ',
-  'Nghệ thuật',
-  'Thời trang',
-  'Sưu tầm',
-  'Rượu vang',
-  'Xe thuyền',
-  'Nhạc cụ',
-] as const;
-
+// Categories are loaded dynamically from the API (GET /api/categories)
 export const AUCTION_STATUS = {
   ACTIVE: 'active',
   UPCOMING: 'upcoming',

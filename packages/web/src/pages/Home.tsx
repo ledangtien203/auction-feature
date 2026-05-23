@@ -1,12 +1,10 @@
 import { Link } from 'react-router-dom';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { ArrowRight, Clock, TrendingUp, Sparkles, Shield, Zap } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { CountdownTimer } from '../components/CountdownTimer';
-// import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 import { auctionService } from '../services/auctionService';
 import type { Auction } from '../types/auction';
-// import { addSyncEventListener } from '../lib/syncStorage';
 import { formatCurrency } from '../utils/formatters';
 
 export function Home() {
@@ -15,41 +13,83 @@ export function Home() {
   const [featuredAuctions, setFeaturedAuctions] = useState<Auction[]>([]);
   const [hotDeals, setHotDeals] = useState<Auction[]>([]);
   const [trendingAuctions, setTrendingAuctions] = useState<Auction[]>([]);
+  const [newAuctions, setNewAuctions] = useState<Auction[]>([]);
   const [loading, setLoading] = useState(true);
+  const fetchedRef = useRef(false);
 
-  // Fetch active auctions and dedicated homepage lists
   const fetchAuctions = useCallback(async () => {
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
+
     setLoading(true);
     try {
+      // Fetch all auctions without limit for home page
       const [allList, activeList] = await Promise.all([
-        auctionService.getAuctions({ limit: 12 }),
-        auctionService.getAuctions({ status: 'active', limit: 12 }),
+        auctionService.getAuctions({ limit: 100 }),
+        auctionService.getAuctions({ status: 'active', limit: 100 }),
       ]);
 
-      const safeActiveList = activeList.length
-        ? activeList
-        : allList.filter((auction) => auction.status === 'active');
-      const activeSource = safeActiveList.length ? safeActiveList : allList;
+      // Deduplicate by id - track globally
+      const globalSeen = new Set<string>();
+      
+      const uniqueAll = allList.filter((a) => {
+        if (globalSeen.has(a.id)) return false;
+        globalSeen.add(a.id);
+        return true;
+      });
+      
+      const uniqueActive = activeList.filter((a) => {
+        if (globalSeen.has(a.id)) return false;
+        globalSeen.add(a.id);
+        return true;
+      });
 
-      const [featuredResult, trendingResult] = await Promise.allSettled([
-        auctionService.getFeaturedAuctions(4),
-        auctionService.getTrendingAuctions(4),
+      const safeActiveList = uniqueActive.length
+        ? uniqueActive
+        : uniqueAll.filter((auction) => auction.status === 'active');
+      const activeSource = safeActiveList.length ? safeActiveList : uniqueAll;
+
+      // Featured/trending/new with more results - deduplicate
+      const [featuredResult, trendingResult, newResult] = await Promise.allSettled([
+        auctionService.getFeaturedAuctions(12),
+        auctionService.getTrendingAuctions(12),
+        auctionService.getNewAuctions(12),
       ]);
 
-      const featuredList = featuredResult.status === 'fulfilled' ? featuredResult.value : [];
-      const trendingList = trendingResult.status === 'fulfilled' ? trendingResult.value : [];
+      const featuredList = (featuredResult.status === 'fulfilled' ? featuredResult.value : [])
+        .filter((a) => {
+          if (globalSeen.has(a.id)) return false;
+          globalSeen.add(a.id);
+          return true;
+        });
+      
+      const trendingList = (trendingResult.status === 'fulfilled' ? trendingResult.value : [])
+        .filter((a) => {
+          if (globalSeen.has(a.id)) return false;
+          globalSeen.add(a.id);
+          return true;
+        });
 
-      setAllAuctions(allList);
+      const newList = (newResult.status === 'fulfilled' ? newResult.value : [])
+        .filter((a) => {
+          if (globalSeen.has(a.id)) return false;
+          globalSeen.add(a.id);
+          return true;
+        });
+
+      setAllAuctions(uniqueAll);
       setActiveAuctions(activeSource);
-      setHotDeals(featuredList.length ? featuredList : activeSource.slice(0, 4));
+      setHotDeals(featuredList.length ? featuredList : activeSource.slice(0, 12));
       setFeaturedAuctions(featuredList);
       setTrendingAuctions(trendingList);
+      setNewAuctions(newList);
     } catch {
       setAllAuctions([]);
       setActiveAuctions([]);
       setHotDeals([]);
       setFeaturedAuctions([]);
       setTrendingAuctions([]);
+      setNewAuctions([]);
     } finally {
       setLoading(false);
     }
@@ -59,29 +99,18 @@ export function Home() {
     fetchAuctions();
   }, [fetchAuctions]);
 
-  useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key !== 'app-sync-event') return;
-      fetchAuctions();
-    };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, [fetchAuctions]);
-
   const highestBidAuction =
     [...activeAuctions].sort((a, b) => b.totalBids - a.totalBids)[0] || null;
   const featuredAuction = featuredAuctions[0] || highestBidAuction;
-  const hotDealsList = hotDeals.length ? hotDeals : activeAuctions.slice(0, 4);
+  const hotDealsList = hotDeals.length ? hotDeals : activeAuctions.slice(0, 12);
   const trendingAuctionsList = trendingAuctions.length
     ? trendingAuctions
-    : activeAuctions.slice(0, 3);
-  const newArrivals = [...activeAuctions].reverse().slice(0, 4);
-  const newArrivalsList = newArrivals.length ? newArrivals : activeAuctions.slice(0, 4);
+    : activeAuctions.slice(0, 6);
+  const newArrivalsList = newAuctions.length ? newAuctions : activeAuctions.slice(0, 12);
 
   const getDisplayPrice = (auction: Auction) =>
     auction.currentBid > 0 ? auction.currentBid : auction.startingBid;
 
-  // Loading state
   if (loading) {
     return (
       <div className="min-h-[50vh] flex items-center justify-center text-muted-foreground">

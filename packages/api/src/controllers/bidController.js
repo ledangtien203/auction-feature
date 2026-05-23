@@ -1,6 +1,5 @@
 import { getPool } from '../config/database.js';
 import { mapBidRow, mapAuctionRow } from '../utils/rows.js';
-import { mapAuctionRow as mapAuctionRowUtil } from '../utils/rows.js';
 
 const pool = getPool();
 
@@ -13,11 +12,13 @@ export const bidController = {
     try {
       const userId = req.user.id;
       const [bids] = await pool.execute(
-        `SELECT b.id, b.auction_id, a.title AS auction_title, b.amount, b.created_at
-         FROM bids b
-         JOIN auctions a ON a.id = b.auction_id
-         WHERE b.user_id = ?
-         ORDER BY b.created_at DESC`,
+        `SELECT h.id, h.auction_id, h.user_id, h.bid_amount, h.bid_time,
+                p.title AS auction_title
+         FROM auction_history h
+         JOIN auction a ON a.id = h.auction_id
+         JOIN product p ON p.id = a.product_id
+         WHERE h.user_id = ?
+         ORDER BY h.bid_time DESC`,
         [userId]
       );
 
@@ -25,14 +26,14 @@ export const bidController = {
       const winnerByAuction = new Map();
       for (const aid of auctionIds) {
         const [w] = await pool.execute(
-          `SELECT user_id, amount FROM bids WHERE auction_id = ?
-           ORDER BY amount DESC, created_at DESC LIMIT 1`,
+          `SELECT user_id, bid_amount FROM auction_history WHERE auction_id = ?
+           ORDER BY bid_amount DESC, bid_time ASC LIMIT 1`,
           [aid]
         );
         if (w[0]) {
           winnerByAuction.set(Number(aid), {
             userId: Number(w[0].user_id),
-            amount: Number(w[0].amount),
+            amount: Number(w[0].bid_amount),
           });
         }
       }
@@ -40,15 +41,21 @@ export const bidController = {
       const out = bids.map((b) => {
         const aid = Number(b.auction_id);
         const win = winnerByAuction.get(aid);
-        const isWinning = win && win.userId === userId && Number(b.amount) === win.amount;
-        return mapBidRow({ ...b, is_winning: isWinning });
+        const isWinning = win && win.userId === userId && Number(b.bid_amount) === win.amount;
+        return {
+          ...mapBidRow({ ...b, is_winning: isWinning }),
+          auctionTitle: b.auction_title,
+        };
       });
 
       const [auctions] =
         auctionIds.length === 0
           ? [[]]
-          : await pool.query(
-              `SELECT * FROM auctions WHERE id IN (${auctionIds.map(() => '?').join(',')})`,
+          : await pool.execute(
+              `SELECT a.*, p.title AS auction_title
+               FROM auction a
+               JOIN product p ON p.id = a.product_id
+               WHERE a.id IN (${auctionIds.map(() => '?').join(',')})`,
               auctionIds
             );
       const auctionById = new Map(auctions.map((a) => [a.id, mapAuctionRow(a)]));
@@ -68,21 +75,26 @@ export const bidController = {
         return res.status(400).json({ message: 'Dữ liệu không hợp lệ' });
       }
 
-      const [urows] = await conn.execute(`SELECT status FROM users WHERE id = ?`, [req.user.id]);
-      if (!urows[0] || urows[0].status !== 'active') {
+      const [urows] = await conn.execute(`SELECT is_blocked FROM user WHERE id = ?`, [req.user.id]);
+      if (!urows[0] || urows[0].is_blocked) {
         return res.status(403).json({ message: 'Tài khoản không thể đặt giá' });
       }
 
       await conn.beginTransaction();
-      const [arows] = await conn.execute(`SELECT * FROM auctions WHERE id = ? FOR UPDATE`, [
-        auctionId,
-      ]);
+      const [arows] = await conn.execute(
+        `SELECT a.*, p.title AS product_title, s.name AS status_name
+         FROM auction a
+         JOIN product p ON p.id = a.product_id
+         JOIN auction_status s ON s.id = a.status_id
+         WHERE a.id = ? FOR UPDATE`,
+        [auctionId]
+      );
       const a = arows[0];
       if (!a) {
         await conn.rollback();
         return res.status(404).json({ message: 'Không tìm thấy đấu giá' });
       }
-      if (a.status !== 'active') {
+      if (a.status_id !== 1) {
         await conn.rollback();
         return res.status(400).json({ message: 'Phiên đấu giá không hoạt động' });
       }
@@ -91,52 +103,72 @@ export const bidController = {
         await conn.rollback();
         return res.status(400).json({ message: 'Phiên đấu giá đã kết thúc' });
       }
-      const current = Number(a.current_bid);
-      const minInc = Number(a.min_increment);
-      const minNext = current > 0 ? current + minInc : Number(a.starting_bid);
+      const current = Number(a.current_price);
+      const minInc = Number(a.bid_increment);
+      const minNext = current > 0 ? current + minInc : Number(a.start_price);
       if (amount < minNext) {
         await conn.rollback();
         return res.status(400).json({ message: `Giá tối thiểu là ${minNext}` });
       }
 
       const [prevTopBid] = await conn.execute(
-        `SELECT id, user_id, amount FROM bids WHERE auction_id = ? ORDER BY amount DESC LIMIT 1`,
+        `SELECT id, user_id, bid_amount FROM auction_history WHERE auction_id = ? ORDER BY bid_amount DESC LIMIT 1`,
         [auctionId]
       );
       const prevTopBidder = prevTopBid[0] || null;
 
-      await conn.execute(`INSERT INTO bids (auction_id, user_id, amount) VALUES (?, ?, ?)`, [
-        auctionId,
-        req.user.id,
-        amount,
-      ]);
       await conn.execute(
-        `UPDATE auctions SET current_bid = ?, total_bids = total_bids + 1 WHERE id = ?`,
+        `INSERT INTO auction_history (auction_id, user_id, bid_amount) VALUES (?, ?, ?)`,
+        [auctionId, req.user.id, amount]
+      );
+      await conn.execute(
+        `UPDATE auction SET current_price = ? WHERE id = ?`,
         [amount, auctionId]
       );
 
-      let outbidNotification = null;
-      if (prevTopBidder && Number(prevTopBidder.user_id) !== req.user.id) {
-        const [existingOutbid] = await conn.execute(
-          `SELECT id FROM notifications WHERE user_id = ? AND auction_id = ? AND type = 'outbid'
-           AND DATE(created_at) = CURDATE() LIMIT 1`,
-          [prevTopBidder.user_id, auctionId]
+      // Gửi thông báo cho tất cả người đã bid trừ người đang bid
+      const [allBidders] = await conn.execute(
+        `SELECT DISTINCT user_id FROM auction_history 
+         WHERE auction_id = ? AND user_id != ?`,
+        [auctionId, req.user.id]
+      );
+
+      for (const bidder of allBidders) {
+        // Xóa thông báo overbid cũ nếu có (để gửi thông báo mới với giá mới)
+        await conn.execute(
+          `DELETE FROM notification 
+           WHERE user_id = ? AND auction_id = ? AND title = 'Bạn đã bị vượt giá!'`,
+          [bidder.user_id, auctionId]
         );
-        if (existingOutbid.length === 0) {
-          const outbidTitle = 'Bạn đã bị vượt giá!';
-          const outbidMessage = `Có người đặt giá cao hơn bạn ${formatVnd(amount)} VNĐ cho phiên "${a.title}". Hãy đặt giá cao hơn để giành chiến thắng!`;
-          await conn.execute(
-            `INSERT INTO notifications (user_id, type, title, message, auction_id)
-             VALUES (?, 'outbid', ?, ?, ?)`,
-            [prevTopBidder.user_id, outbidTitle, outbidMessage, auctionId]
-          );
-          outbidNotification = { userId: prevTopBidder.user_id, auctionId };
+        
+        // Tạo thông báo overbid mới với giá hiện tại
+        const outbidTitle = 'Bạn đã bị vượt giá!';
+        const outbidMessage = `Có người đặt giá cao hơn bạn ${formatVnd(amount)} VNĐ cho phiên "${a.product_title}". Hãy đặt giá cao hơn để giành chiến thắng!`;
+        await conn.execute(
+          `INSERT INTO notification (user_id, title, message, auction_id) VALUES (?, ?, ?, ?)`,
+          [bidder.user_id, outbidTitle, outbidMessage, auctionId]
+        );
+        
+        // Emit real-time notification
+        if (global.io) {
+          global.io.to(`user-${bidder.user_id}`).emit('user-notification', {
+            userId: bidder.user_id,
+            auctionId: auctionId,
+            type: 'outbid',
+          });
         }
       }
 
       await conn.commit();
 
-      const [updated] = await pool.execute(`SELECT * FROM auctions WHERE id = ?`, [auctionId]);
+      const [updated] = await pool.execute(
+        `SELECT a.*, p.title AS product_title,
+                (SELECT COUNT(*) FROM auction_history h WHERE h.auction_id = a.id) AS total_bids
+         FROM auction a
+         JOIN product p ON p.id = a.product_id
+         WHERE a.id = ?`,
+        [auctionId]
+      );
       const updatedAuction = mapAuctionRow(updated[0]);
 
       if (global.io) {
@@ -145,11 +177,10 @@ export const bidController = {
           auction: updatedAuction,
           newBid: {
             id: null,
-            auction_id: auctionId,
-            user_id: req.user.id,
-            amount: amount,
-            created_at: new Date(),
-            is_winning: true,
+            auctionId: String(auctionId),
+            userId: String(req.user.id),
+            bidAmount: amount,
+            bidTime: new Date(),
           },
         });
 
@@ -160,14 +191,6 @@ export const bidController = {
           userId: req.user.id,
           timestamp: new Date(),
         });
-
-        if (outbidNotification) {
-          global.io.to(`user-${outbidNotification.userId}`).emit('user-notification', {
-            userId: outbidNotification.userId,
-            auctionId: outbidNotification.auctionId,
-            type: 'outbid',
-          });
-        }
       }
 
       res.json({ auction: updatedAuction });
@@ -183,27 +206,31 @@ export const bidController = {
   async getWonAuctions(req, res) {
     try {
       const userId = req.user.id;
-
       const [auctions] = await pool.execute(
-        `SELECT a.*, t.status AS transaction_status, t.payment_method
-         FROM auctions a
-         LEFT JOIN transactions t ON t.auction_id = a.id AND t.user_id = ?
-         WHERE a.winner_user_id = ?
+        `SELECT a.*, p.title AS product_title, p.image AS product_image,
+                s.name AS status_name
+         FROM auction a
+         JOIN product p ON p.id = a.product_id
+         JOIN auction_status s ON s.id = a.status_id
+         WHERE a.winner_id = ?
          ORDER BY a.end_time DESC`,
-        [userId, userId]
+        [userId]
       );
 
       const wonAuctions = await Promise.all(
         auctions.map(async (auction) => {
-          const [winningBid] = await pool.execute(`SELECT * FROM bids WHERE id = ?`, [
-            auction.winning_bid_id,
-          ]);
-
+          const [winningBid] = await pool.execute(
+            `SELECT h.*, u.username FROM auction_history h JOIN user u ON u.id = h.user_id WHERE h.auction_id = ? ORDER BY h.bid_amount DESC LIMIT 1`,
+            [auction.id]
+          );
+          const [tx] = await pool.execute(
+            `SELECT * FROM transaction_history WHERE auction_id = ? AND user_id = ? LIMIT 1`,
+            [auction.id, userId]
+          );
           return {
             ...mapAuctionRow(auction),
             winningBid: winningBid[0] ? mapBidRow(winningBid[0]) : null,
-            transactionStatus: auction.transaction_status,
-            paymentMethod: auction.payment_method,
+            transactionStatus: tx[0]?.status || null,
           };
         })
       );

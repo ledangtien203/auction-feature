@@ -14,9 +14,13 @@ export async function finalizeAuction(auctionId, { notify = true, forceNotify = 
   try {
     await conn.beginTransaction();
 
-    const [arows] = await conn.execute(`SELECT * FROM auctions WHERE id = ? FOR UPDATE`, [
-      auctionId,
-    ]);
+    const [arows] = await conn.execute(
+      `SELECT a.*, p.title AS product_title
+       FROM auction a
+       JOIN product p ON p.id = a.product_id
+       WHERE a.id = ? FOR UPDATE`,
+      [auctionId]
+    );
     const auction = arows[0];
     if (!auction) {
       await conn.rollback();
@@ -24,75 +28,111 @@ export async function finalizeAuction(auctionId, { notify = true, forceNotify = 
     }
 
     const [topBids] = await conn.execute(
-      `SELECT id, user_id, amount FROM bids
+      `SELECT id, user_id, bid_amount FROM auction_history
        WHERE auction_id = ?
-       ORDER BY amount DESC, created_at DESC
+       ORDER BY bid_amount DESC, bid_time ASC
        LIMIT 1`,
       [auctionId]
     );
     const topBid = topBids[0];
 
     await conn.execute(
-      `UPDATE auctions SET status = 'ended', winner_user_id = ?, winning_bid_id = ? WHERE id = ?`,
-      [topBid ? topBid.user_id : null, topBid ? topBid.id : null, auctionId]
+      `UPDATE auction SET status_id = 2, winner_id = ? WHERE id = ?`,
+      [topBid ? topBid.user_id : null, auctionId]
     );
 
     let notificationCreated = false;
     let transactionCreated = false;
 
     if (notify && topBid) {
-      const [existing] = await conn.execute(
-        `SELECT id FROM notifications
-         WHERE user_id = ? AND auction_id = ? AND type = 'won'
-         LIMIT 1`,
+      // Gửi thông báo cho NGƯỜI THẮNG
+      const [existingWinner] = await conn.execute(
+        `SELECT id FROM notification WHERE user_id = ? AND auction_id = ? AND title LIKE 'Chúc mừng%' LIMIT 1`,
         [topBid.user_id, auctionId]
       );
 
-      if (existing.length === 0 || forceNotify) {
-        if (forceNotify && existing.length > 0) {
-          await conn.execute(`DELETE FROM notifications WHERE id = ?`, [existing[0].id]);
+      if (existingWinner.length === 0 || forceNotify) {
+        if (forceNotify && existingWinner.length > 0) {
+          await conn.execute(`DELETE FROM notification WHERE id = ?`, [existingWinner[0].id]);
         }
 
         const title = 'Chúc mừng! Bạn đã thắng đấu giá';
-        const message = `Bạn là người thắng phiên "${auction.title}" với giá ${formatVnd(topBid.amount)} VNĐ. Vui lòng hoàn tất thanh toán trong mục giao dịch.`;
+        const message = `Bạn là người thắng phiên "${auction.product_title}" với giá ${formatVnd(topBid.bid_amount)} VNĐ. Vui lòng hoàn tất thanh toán trong mục giao dịch.`;
 
         await conn.execute(
-          `INSERT INTO notifications (user_id, type, title, message, auction_id)
-           VALUES (?, 'won', ?, ?, ?)`,
+          `INSERT INTO notification (user_id, title, message, auction_id) VALUES (?, ?, ?, ?)`,
           [topBid.user_id, title, message, auctionId]
         );
         notificationCreated = true;
 
+        // Gửi real-time cho winner
+        if (global.io) {
+          global.io.to(`user-${topBid.user_id}`).emit('user-notification', {
+            userId: topBid.user_id,
+            auctionId,
+            type: 'won',
+          });
+        }
+
+        // Tạo giao dịch pending cho winner
         const [txExists] = await conn.execute(
-          `SELECT id FROM transactions WHERE auction_id = ? LIMIT 1`,
+          `SELECT id FROM transaction_history WHERE auction_id = ? LIMIT 1`,
           [auctionId]
         );
         if (txExists.length === 0) {
           await conn.execute(
-            `INSERT INTO transactions (auction_id, user_id, amount, status)
-             VALUES (?, ?, ?, 'pending')`,
-            [auctionId, topBid.user_id, topBid.amount]
+            `INSERT INTO transaction_history (user_id, auction_id, amount, type, status)
+             VALUES (?, ?, ?, 'payment', 'pending')`,
+            [topBid.user_id, auctionId, topBid.bid_amount]
           );
           transactionCreated = true;
+        }
+      }
+
+      // Gửi thông báo cho TẤT CẢ NGƯỜI THAM GIA (trừ winner)
+      const [allBidders] = await conn.execute(
+        `SELECT DISTINCT user_id FROM auction_history WHERE auction_id = ?`,
+        [auctionId]
+      );
+
+      for (const bidder of allBidders) {
+        if (Number(bidder.user_id) === Number(topBid.user_id)) continue; // Skip winner
+
+        // Kiểm tra đã thông báo kết quả cho user này chưa
+        const [existingResult] = await conn.execute(
+          `SELECT id FROM notification 
+           WHERE user_id = ? AND auction_id = ? AND title LIKE 'Kết quả đấu giá%' LIMIT 1`,
+          [bidder.user_id, auctionId]
+        );
+
+        if (existingResult.length === 0) {
+          const resultTitle = 'Kết quả đấu giá';
+          const resultMessage = `Phiên đấu giá "${auction.product_title}" đã kết thúc. Người thắng: ${formatVnd(topBid.bid_amount)} VNĐ. Cảm ơn bạn đã tham gia!`;
+
+          await conn.execute(
+            `INSERT INTO notification (user_id, title, message, auction_id) VALUES (?, ?, ?, ?)`,
+            [bidder.user_id, resultTitle, resultMessage, auctionId]
+          );
+
+          // Emit real-time notification
+          if (global.io) {
+            global.io.to(`user-${bidder.user_id}`).emit('user-notification', {
+              userId: bidder.user_id,
+              auctionId,
+              type: 'auction_ended',
+            });
+          }
         }
       }
     }
 
     await conn.commit();
 
-    if (global.io && notificationCreated && topBid) {
-      global.io.emit('user-notification', {
-        userId: topBid.user_id,
-        auctionId,
-        type: 'won',
-      });
-    }
-
     return {
       ok: true,
       auctionId,
       winnerUserId: topBid?.user_id ?? null,
-      winningAmount: topBid ? Number(topBid.amount) : null,
+      winningAmount: topBid ? Number(topBid.bid_amount) : null,
       notificationCreated,
       transactionCreated,
       message: topBid
@@ -113,7 +153,7 @@ export async function finalizeAuction(auctionId, { notify = true, forceNotify = 
 export async function finalizeExpiredAuctions() {
   const pool = getPool();
   const [rows] = await pool.execute(
-    `SELECT id FROM auctions WHERE status = 'active' AND end_time <= NOW()`
+    `SELECT id FROM auction WHERE status_id = 1 AND end_time <= NOW()`
   );
 
   const results = [];

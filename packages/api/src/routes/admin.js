@@ -20,5 +20,22 @@ router.post('/auctions/process-expired', adminController.processExpiredAuctions)
 router.post('/auctions/:id/notify-winner', adminController.notifyWinner);
 router.get('/transactions', adminController.getTransactions);
 router.patch('/transactions/:id', adminController.updateTransactionStatus);
+router.get('/categories', adminController.getCategories);
+router.post('/categories', adminController.createCategory);
+router.put('/categories/:id', adminController.updateCategory);
+router.delete('/categories/:id', adminController.deleteCategory);
+
+// Products
+router.get('/products', adminController.getProducts);
+router.post('/products', adminController.createProduct);
+router.put('/products/:id', adminController.updateProduct);
+router.delete('/products/:id', adminController.deleteProduct);
+
+// Settings
+router.get('/settings', adminController.getSettings);
+router.put('/settings', adminController.updateSettings);
+
+// System
+router.get('/reports/stats', adminController.getReportStats);
 
 export default router;

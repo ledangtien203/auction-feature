@@ -8,9 +8,17 @@ export const watchlistController = {
     try {
       const userId = req.user.id;
       const [rows] = await pool.execute(
-        `SELECT a.*, w.created_at AS watched_at
-         FROM auction_watchlist w
-         JOIN auctions a ON a.id = w.auction_id
+        `SELECT a.*, w.created_at AS watched_at,
+                p.name AS product_name, p.title AS product_title,
+                p.description AS product_description, p.image AS product_image,
+                p.category_id, c.name AS category_name,
+                seller.name AS seller_name,
+                (SELECT COUNT(*) FROM auction_history h WHERE h.auction_id = a.id) AS total_bids
+         FROM watchlist w
+         JOIN auction a ON a.id = w.auction_id
+         JOIN product p ON p.id = a.product_id
+         LEFT JOIN product_category c ON c.id = p.category_id
+         JOIN user seller ON seller.id = a.seller_id
          WHERE w.user_id = ?
          ORDER BY w.created_at DESC`,
         [userId]
@@ -34,13 +42,13 @@ export const watchlistController = {
         return res.status(400).json({ message: 'ID đấu giá không hợp lệ' });
       }
 
-      const [auctions] = await pool.execute(`SELECT id FROM auctions WHERE id = ?`, [auctionId]);
+      const [auctions] = await pool.execute(`SELECT id FROM auction WHERE id = ?`, [auctionId]);
       if (!auctions[0]) {
         return res.status(404).json({ message: 'Không tìm thấy đấu giá' });
       }
 
       const [existing] = await pool.execute(
-        `SELECT * FROM auction_watchlist WHERE user_id = ? AND auction_id = ?`,
+        `SELECT * FROM watchlist WHERE user_id = ? AND auction_id = ?`,
         [userId, auctionId]
       );
 
@@ -49,7 +57,7 @@ export const watchlistController = {
       }
 
       await pool.execute(
-        `INSERT INTO auction_watchlist (user_id, auction_id) VALUES (?, ?)`,
+        `INSERT INTO watchlist (user_id, auction_id) VALUES (?, ?)`,
         [userId, auctionId]
       );
 
@@ -70,7 +78,7 @@ export const watchlistController = {
       }
 
       const [result] = await pool.execute(
-        `DELETE FROM auction_watchlist WHERE user_id = ? AND auction_id = ?`,
+        `DELETE FROM watchlist WHERE user_id = ? AND auction_id = ?`,
         [userId, auctionId]
       );
 
@@ -95,7 +103,7 @@ export const watchlistController = {
       }
 
       const [rows] = await pool.execute(
-        `SELECT * FROM auction_watchlist WHERE user_id = ? AND auction_id = ?`,
+        `SELECT * FROM watchlist WHERE user_id = ? AND auction_id = ?`,
         [userId, auctionId]
       );
 

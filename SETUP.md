@@ -23,7 +23,7 @@ MYSQL_HOST=localhost
 MYSQL_PORT=3306
 MYSQL_USER=root
 MYSQL_PASSWORD=yourpassword
-MYSQL_DATABASE=auction_db
+MYSQL_DATABASE=auction_system
 ```
 
 ### 3. Initialize Database
@@ -144,7 +144,7 @@ MYSQL_HOST=localhost
 MYSQL_PORT=3306
 MYSQL_USER=root
 MYSQL_PASSWORD=root
-MYSQL_DATABASE=auction_db
+MYSQL_DATABASE=auction_system
 ```
 
 **Generate JWT_SECRET:**

@@ -13,13 +13,8 @@ export const config = {
     port: Number(process.env.MYSQL_PORT || 3306),
     user: process.env.MYSQL_USER || 'root',
     password: process.env.MYSQL_PASSWORD || '',
-    database: process.env.MYSQL_DATABASE || 'auction_db',
+    database: process.env.MYSQL_DATABASE || 'auction_system',
   },
-  openai_api_key: process.env.OPENAI_API_KEY || '',
-  gemini_api_key: process.env.GEMINI_API_KEY || '',
-  openai_model: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
-  gemini_model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
-  ai_provider: process.env.AI_PROVIDER || 'openai',
   ai_system_prompt:
     process.env.AI_SYSTEM_PROMPT ||
     'Bạn là trợ lý AI cho nền tảng đấu giá trực tuyến. Trả lời ngắn gọn, hữu ích, bằng tiếng Việt.',

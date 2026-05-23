@@ -1,15 +1,27 @@
 export interface User {
   id: string;
-  name: string;
+  username: string;
   email: string;
-  role: 'admin' | 'user';
-  status: 'active' | 'suspended';
-  joinDate: Date;
+  name: string | null;
+  phone: string | null;
+  avatar: string | null;
+  address: string | null;
+  birthday: string | null;
+  roleId: string;
+  isVerified: boolean;
+  isBlocked: boolean;
+  balance: number;
+  rating: number;
+  createdAt: string;
+  // join
+  roleName: string | null;
+  // mapped fields
+  role: string;
+  status: 'active' | 'blocked';
+  joinDate: string;
   totalBids: number;
   totalSpent: number;
-  phone?: string;
-  avatar?: string;
 }
 
 export type UserRole = 'admin' | 'user';
-export type UserStatus = 'active' | 'suspended';
+export type UserStatus = 'active' | 'blocked';

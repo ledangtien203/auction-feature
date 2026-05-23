@@ -1,11 +1,10 @@
-<<<<<<< HEAD
-# 🏷️ Auction System - Monorepo
+# Auction System - Monorepo
 
 A modern online auction platform built with React, Node.js, Express, and MySQL. This is a monorepo structure using pnpm workspaces for managing backend and frontend packages.
 
 **Original Design:** [Figma - Online Auction Website](https://www.figma.com/design/g2jNwiidSd7IBJAUMkmQGl/Online-Auction-Website)
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 packages/
@@ -14,7 +13,7 @@ packages/
 database/         # Database schema
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -72,7 +71,7 @@ pnpm build      # Build frontend (output: packages/web/dist)
 pnpm seed       # Load sample data
 ```
 
-## 📦 Available Scripts
+## Available Scripts
 
 **Root level:**
 
@@ -93,7 +92,7 @@ pnpm seed       # Load sample data
 - `npm run build` - Build for production
 - `npm run preview` - Preview production build
 
-## 🏗️ Architecture
+## Architecture
 
 ### Backend (`packages/api/src`)
 
@@ -120,7 +119,7 @@ Component-driven architecture:
 - **utils/** - Helper utilities, formatters
 - **styles/** - Global CSS and Tailwind theming
 
-## 🔌 API Endpoints
+## API Endpoints
 
 ### Authentication
 
@@ -145,7 +144,7 @@ Component-driven architecture:
 - `GET /api/admin/dashboard` - Dashboard statistics
 - `GET /api/admin/users` - User management
 
-## 🔐 Environment Variables
+## Environment Variables
 
 ```env
 # Server
@@ -157,10 +156,10 @@ MYSQL_HOST=localhost
 MYSQL_PORT=3306
 MYSQL_USER=root
 MYSQL_PASSWORD=yourpassword
-MYSQL_DATABASE=auction_db
+MYSQL_DATABASE=auction_system
 ```
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 ### Backend
 
@@ -180,7 +179,7 @@ MYSQL_DATABASE=auction_db
 - **Routing:** React Router
 - **HTTP Client:** Fetch API
 
-## 📋 Database Schema
+## Database Schema
 
 Main tables:
 
@@ -191,7 +190,7 @@ Main tables:
 
 See `database/schema.sql` for full schema.
 
-## 🤝 Development Workflow
+## Development Workflow
 
 1. **Create a feature branch**
 
@@ -216,13 +215,10 @@ See `database/schema.sql` for full schema.
    git push origin feature/feature-name
    ```
 
-## 📝 License
+## License
 
 Private project - All rights reserved
 
 ---
 
 **Built with ❤️**
-=======
-# auction-feature
->>>>>>> a3a26c68539a1a2675fd3644ed6370afdbf61a87

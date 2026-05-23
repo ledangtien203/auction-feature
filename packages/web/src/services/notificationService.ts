@@ -14,8 +14,7 @@ export interface Notification {
 
 export const notificationService = {
   async getMyNotifications(): Promise<Notification[]> {
-    const res = await api<{ notifications: Notification[] }>('/api/notifications/me');
-    return res.notifications;
+    return api<Notification[]>('/api/notifications/me');
   },
 
   async getUnreadCount(): Promise<number> {
@@ -24,10 +23,10 @@ export const notificationService = {
   },
 
   async markAsRead(id: string): Promise<void> {
-    await api(`/api/notifications/${encodeURIComponent(id)}/read`, { method: 'PATCH' });
+    await api(`/api/notifications/${encodeURIComponent(id)}/read`, { method: 'PUT' });
   },
 
   async markAllAsRead(): Promise<void> {
-    await api('/api/notifications/read-all', { method: 'PATCH' });
+    await api('/api/notifications/read-all', { method: 'PUT' });
   },
 };
