@@ -1,15 +1,12 @@
 export interface Transaction {
   id: string;
   userId: string;
-  userName: string | null;
-  auctionId: string | null;
-  auctionTitle: string | null;
+  userName: string;
+  auctionId: string;
+  auctionTitle: string;
   amount: number;
-  type: 'deposit' | 'withdraw' | 'payment' | 'refund';
-  status: 'pending' | 'completed' | 'failed';
-  timestamp: string;
-  createdAt: string;
+  timestamp: Date;
+  status: 'pending' | 'completed' | 'cancelled';
 }
 
-export type TransactionStatus = 'pending' | 'completed' | 'failed';
-export type TransactionType = 'deposit' | 'withdraw' | 'payment' | 'refund';
+export type TransactionStatus = 'pending' | 'completed' | 'cancelled';

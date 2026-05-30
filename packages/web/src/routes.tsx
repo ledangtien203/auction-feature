@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate } from 'react-router-dom';
+import { createBrowserRouter } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { AdminLayout } from './components/AdminLayout';
 import { AdminGuard } from './components/AdminGuard';
@@ -6,53 +6,47 @@ import { AuthGuard } from './components/AuthGuard';
 import { Home } from './pages/Home';
 import { Auctions } from './pages/Auctions';
 import { AuctionDetail } from './pages/AuctionDetail';
+import { MyBids } from './pages/MyBids';
+import { WonAuctions } from './pages/WonAuctions';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
-import { UserDashboardLayout } from './components/UserDashboardLayout';
-import { UserDashboardContent } from './components/UserDashboardContent';
-import { UserBidsContent } from './components/UserBidsContent';
-import { UserWonContent } from './components/UserWonContent';
-import { UserWatchlistContent } from './components/UserWatchlistContent';
-import { UserAuctionsContent } from './components/UserAuctionsContent';
-import { UserSettingsContent } from './components/UserSettingsContent';
+import { UserDashboard } from './pages/user/UserDashboard';
 import { Dashboard } from './pages/admin/Dashboard';
 import { AdminAuctions } from './pages/admin/AdminAuctions';
+import { AdminCategories } from './pages/admin/AdminCategories';
 import { AdminUsers } from './pages/admin/AdminUsers';
-import { AdminProducts } from './pages/admin/AdminProducts';
 import { AdminTransactions } from './pages/admin/AdminTransactions';
 import { AdminReports } from './pages/admin/AdminReports';
+import { AdminTheme } from './pages/admin/AdminTheme';
 import { AdminSettings } from './pages/admin/AdminSettings';
+import { Settings } from './pages/Settings';
+import { MyAuctions } from './pages/MyAuctions';
+import { About } from './pages/About';
 
 export const router = createBrowserRouter([
-  // Public routes
   {
     path: '/',
     Component: Layout,
     children: [
       { index: true, Component: Home },
       { path: 'auctions', Component: Auctions },
+      { path: 'about', Component: About },
       { path: 'auctions/:id', Component: AuctionDetail },
-      { path: 'login', Component: Login },
-      { path: 'register', Component: Register },
+      { path: 'my-bids', Component: MyBids },
+      { path: 'won-auctions', Component: WonAuctions },
+      { path: 'settings', element: <AuthGuard><Settings /></AuthGuard> },
+      { path: 'my-auctions', element: <AuthGuard><MyAuctions /></AuthGuard> },
+      { path: 'user/dashboard', element: <AuthGuard><UserDashboard /></AuthGuard> },
     ],
   },
-
-  // User Dashboard routes (with sidebar layout)
   {
-    path: '/user',
-    element: <AuthGuard><UserDashboardLayout /></AuthGuard>,
-    children: [
-      { index: true, element: <Navigate to="/user/dashboard" replace /> },
-      { path: 'dashboard', Component: UserDashboardContent },
-      { path: 'bids', Component: UserBidsContent },
-      { path: 'auctions', Component: UserAuctionsContent },
-      { path: 'won', Component: UserWonContent },
-      { path: 'watchlist', Component: UserWatchlistContent },
-      { path: 'settings', Component: UserSettingsContent },
-    ],
+    path: '/login',
+    Component: Login,
   },
-
-  // Admin routes
+  {
+    path: '/register',
+    Component: Register,
+  },
   {
     path: '/admin',
     element: (
@@ -63,10 +57,11 @@ export const router = createBrowserRouter([
     children: [
       { index: true, Component: Dashboard },
       { path: 'auctions', Component: AdminAuctions },
-      { path: 'products', Component: AdminProducts },
+      { path: 'categories', Component: AdminCategories },
       { path: 'users', Component: AdminUsers },
       { path: 'transactions', Component: AdminTransactions },
       { path: 'reports', Component: AdminReports },
+      { path: 'theme', Component: AdminTheme },
       { path: 'settings', Component: AdminSettings },
     ],
   },

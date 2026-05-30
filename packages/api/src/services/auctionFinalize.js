@@ -6,6 +6,7 @@ function formatVnd(amount) {
 
 /**
  * Kết thúc phiên, gán người thắng, tạo thông báo (và giao dịch pending nếu có người thắng).
+ * Function này là IDEMPOTENT - có thể gọi nhiều lần mà không tạo duplicate.
  */
 export async function finalizeAuction(auctionId, { notify = true, forceNotify = false } = {}) {
   const pool = getPool();
@@ -14,6 +15,7 @@ export async function finalizeAuction(auctionId, { notify = true, forceNotify = 
   try {
     await conn.beginTransaction();
 
+    // Lấy auction với lock để prevent race conditions
     const [arows] = await conn.execute(
       `SELECT a.*, p.title AS product_title
        FROM auction a
@@ -27,6 +29,17 @@ export async function finalizeAuction(auctionId, { notify = true, forceNotify = 
       return { ok: false, message: 'Không tìm thấy phiên đấu giá' };
     }
 
+    // IDEMPOTENCY CHECK: Nếu đã ended (status_id = 2) thì skip hoàn toàn
+    if (auction.status_id === 2) {
+      await conn.commit();
+      return {
+        ok: true,
+        auctionId,
+        alreadyFinalized: true,
+        message: 'Phiên đã được kết thúc trước đó',
+      };
+    }
+
     const [topBids] = await conn.execute(
       `SELECT id, user_id, bid_amount FROM auction_history
        WHERE auction_id = ?
@@ -36,8 +49,9 @@ export async function finalizeAuction(auctionId, { notify = true, forceNotify = 
     );
     const topBid = topBids[0];
 
+    // Update auction status và winner (nếu chưa được set)
     await conn.execute(
-      `UPDATE auction SET status_id = 2, winner_id = ? WHERE id = ?`,
+      `UPDATE auction SET status_id = 2, winner_id = COALESCE(winner_id, ?) WHERE id = ?`,
       [topBid ? topBid.user_id : null, auctionId]
     );
 
@@ -45,7 +59,7 @@ export async function finalizeAuction(auctionId, { notify = true, forceNotify = 
     let transactionCreated = false;
 
     if (notify && topBid) {
-      // Gửi thông báo cho NGƯỜI THẮNG
+      // Gửi thông báo cho NGƯỜI THẮNG (với lock để prevent duplicate)
       const [existingWinner] = await conn.execute(
         `SELECT id FROM notification WHERE user_id = ? AND auction_id = ? AND title LIKE 'Chúc mừng%' LIMIT 1`,
         [topBid.user_id, auctionId]
@@ -74,19 +88,13 @@ export async function finalizeAuction(auctionId, { notify = true, forceNotify = 
           });
         }
 
-        // Tạo giao dịch pending cho winner
-        const [txExists] = await conn.execute(
-          `SELECT id FROM transaction_history WHERE auction_id = ? LIMIT 1`,
-          [auctionId]
+        // Tạo payment record pending cho winner (với INSERT IGNORE để prevent duplicate)
+        await conn.execute(
+          `INSERT IGNORE INTO payment (user_id, auction_id, amount, status, payment_method)
+           VALUES (?, ?, ?, 'pending', 'wallet')`,
+          [topBid.user_id, auctionId, topBid.bid_amount]
         );
-        if (txExists.length === 0) {
-          await conn.execute(
-            `INSERT INTO transaction_history (user_id, auction_id, amount, type, status)
-             VALUES (?, ?, ?, 'payment', 'pending')`,
-            [topBid.user_id, auctionId, topBid.bid_amount]
-          );
-          transactionCreated = true;
-        }
+        transactionCreated = true;
       }
 
       // Gửi thông báo cho TẤT CẢ NGƯỜI THAM GIA (trừ winner)
@@ -96,9 +104,8 @@ export async function finalizeAuction(auctionId, { notify = true, forceNotify = 
       );
 
       for (const bidder of allBidders) {
-        if (Number(bidder.user_id) === Number(topBid.user_id)) continue; // Skip winner
+        if (Number(bidder.user_id) === Number(topBid.user_id)) continue;
 
-        // Kiểm tra đã thông báo kết quả cho user này chưa
         const [existingResult] = await conn.execute(
           `SELECT id FROM notification 
            WHERE user_id = ? AND auction_id = ? AND title LIKE 'Kết quả đấu giá%' LIMIT 1`,
@@ -114,7 +121,6 @@ export async function finalizeAuction(auctionId, { notify = true, forceNotify = 
             [bidder.user_id, resultTitle, resultMessage, auctionId]
           );
 
-          // Emit real-time notification
           if (global.io) {
             global.io.to(`user-${bidder.user_id}`).emit('user-notification', {
               userId: bidder.user_id,

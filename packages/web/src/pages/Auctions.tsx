@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search, SlidersHorizontal, X } from 'lucide-react';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { AuctionCard } from '../components/AuctionCard';
 import { auctionService } from '../services/auctionService';
 import type { Auction } from '../types/auction';
+import { addSyncEventListener } from '../lib/syncStorage';
 import {
   Select,
   SelectContent,
@@ -20,29 +21,34 @@ export function Auctions() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
-  const fetchedRef = useRef(false);
 
   useEffect(() => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-
+    let cancelled = false;
     (async () => {
       try {
         const list = await auctionService.getAuctions({});
-        // Deduplicate by id
-        const seen = new Set();
-        const unique = list.filter((a) => {
-          if (seen.has(a.id)) return false;
-          seen.add(a.id);
-          return true;
-        });
-        setAllAuctions(unique);
+        if (!cancelled) setAllAuctions(list);
       } catch {
-        setAllAuctions([]);
+        if (!cancelled) setAllAuctions([]);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const cleanup = addSyncEventListener((type) => {
+      if (type !== 'auctions') return;
+      auctionService
+        .getAuctions({})
+        .then(setAllAuctions)
+        .catch(() => setAllAuctions([]));
+    });
+
+    return cleanup;
   }, []);
 
   const categories = useMemo(
@@ -57,11 +63,8 @@ export function Auctions() {
       auction.title.toLowerCase().includes(q) ||
       auction.description.toLowerCase().includes(q) ||
       auction.category.toLowerCase().includes(q) ||
-      (auction.seller || '').toLowerCase().includes(q);
-
-    const statusMap: Record<string, number> = { active: 1, upcoming: 0, ended: 2, cancelled: 3 };
-    const matchesStatus =
-      statusFilter === 'all' || auction.statusId === statusMap[statusFilter];
+      auction.seller.toLowerCase().includes(q);
+    const matchesStatus = statusFilter === 'all' || auction.status === statusFilter;
     const matchesCategory = categoryFilter === 'all' || auction.category === categoryFilter;
 
     return matchesSearch && matchesStatus && matchesCategory;

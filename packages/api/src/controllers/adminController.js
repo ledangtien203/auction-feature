@@ -241,6 +241,19 @@ export const adminController = {
         return res.status(400).json({ message: 'Giá khởi điểm không hợp lệ' });
       }
 
+      // Prevent duplicate active auctions for the same product
+      if (statusId === 1) {
+        const [existingActive] = await pool.execute(
+          `SELECT id FROM auction WHERE product_id = ? AND status_id = 1 LIMIT 1`,
+          [productId]
+        );
+        if (existingActive.length > 0) {
+          return res.status(400).json({ 
+            message: 'Sản phẩm này đã có phiên đấu giá đang hoạt động. Vui lòng chờ phiên hiện tại kết thúc.'
+          });
+        }
+      }
+
       const [r] = await pool.execute(
         `INSERT INTO auction (product_id, seller_id, start_price, current_price, bid_increment, start_time, end_time, duration_minutes, status_id)
          VALUES (?, ?, ?, ?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? MINUTE), ?, ?)`,
@@ -723,6 +736,155 @@ export const adminController = {
     } catch (e) {
       console.error(e);
       res.status(500).json({ message: 'Lỗi máy chủ' });
+    }
+  },
+
+  // Get pending auctions for approval
+  async getPendingAuctions(req, res) {
+    try {
+      const [rows] = await pool.execute(
+        `SELECT a.*,
+                p.name AS product_name, p.title AS product_title,
+                p.description AS product_description, p.image AS product_image,
+                p.category_id, c.name AS category_name,
+                seller.name AS seller_name, seller.email AS seller_email,
+                (SELECT COUNT(*) FROM auction_history h WHERE h.auction_id = a.id) AS total_bids
+         FROM auction a
+         JOIN product p ON p.id = a.product_id
+         LEFT JOIN product_category c ON c.id = p.category_id
+         JOIN user seller ON seller.id = a.seller_id
+         WHERE a.status_id = 5
+         ORDER BY a.created_at ASC`
+      );
+      res.json(rows.map(mapAuctionRow));
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ message: 'Lỗi máy chủ' });
+    }
+  },
+
+  // Approve auction - change status from pending(5) to active(1)
+  async approveAuction(req, res) {
+    const connection = await pool.getConnection();
+    try {
+      const id = Number(req.params.id);
+      
+      // Get auction info
+      const [[auction]] = await connection.execute(
+        `SELECT a.*, p.title AS product_title, seller.id AS seller_id
+         FROM auction a
+         JOIN product p ON p.id = a.product_id
+         JOIN user seller ON seller.id = a.seller_id
+         WHERE a.id = ?`,
+        [id]
+      );
+      
+      if (!auction) {
+        connection.release();
+        return res.status(404).json({ message: 'Không tìm thấy đấu giá' });
+      }
+      
+      if (auction.status_id !== 5) {
+        connection.release();
+        return res.status(400).json({ message: 'Đấu giá không ở trạng thái chờ kiểm duyệt' });
+      }
+
+      await connection.beginTransaction();
+
+      // Update auction status to active
+      await connection.execute(
+        `UPDATE auction SET status_id = 1 WHERE id = ?`,
+        [id]
+      );
+
+      // Update product status to active
+      await connection.execute(
+        `UPDATE product SET status = 'active' WHERE id = ?`,
+        [auction.product_id]
+      );
+
+      // Notify seller
+      await connection.execute(
+        `INSERT INTO notification (user_id, auction_id, title, message)
+         VALUES (?, ?, 'Đấu giá đã được phê duyệt', ?)`,
+        [auction.seller_id, id, `Phiên đấu giá "${auction.product_title}" của bạn đã được phê duyệt và đang hoạt động!`]
+      );
+
+      await connection.commit();
+      connection.release();
+
+      // Emit socket event for real-time updates
+      if (global.io) {
+        global.io.emit('auction-approved', { auctionId: id, statusId: 1 });
+        global.io.emit('auction-updated', { auctionId: id, statusId: 1 });
+      }
+
+      res.json({ message: 'Phê duyệt thành công', auctionId: id });
+    } catch (e) {
+      await connection.rollback();
+      connection.release();
+      console.error(e);
+      res.status(500).json({ message: 'Phê duyệt thất bại' });
+    }
+  },
+
+  // Reject auction - change status from pending(5) to cancelled(3)
+  async rejectAuction(req, res) {
+    const connection = await pool.getConnection();
+    try {
+      const id = Number(req.params.id);
+      const reason = req.body?.reason || 'Không có lý do';
+
+      // Get auction info
+      const [[auction]] = await connection.execute(
+        `SELECT a.*, p.title AS product_title, seller.id AS seller_id
+         FROM auction a
+         JOIN product p ON p.id = a.product_id
+         JOIN user seller ON seller.id = a.seller_id
+         WHERE a.id = ?`,
+        [id]
+      );
+
+      if (!auction) {
+        connection.release();
+        return res.status(404).json({ message: 'Không tìm thấy đấu giá' });
+      }
+
+      if (auction.status_id !== 5) {
+        connection.release();
+        return res.status(400).json({ message: 'Đấu giá không ở trạng thái chờ kiểm duyệt' });
+      }
+
+      await connection.beginTransaction();
+
+      // Update auction status to cancelled
+      await connection.execute(
+        `UPDATE auction SET status_id = 3 WHERE id = ?`,
+        [id]
+      );
+
+      // Update product status to cancelled
+      await connection.execute(
+        `UPDATE product SET status = 'cancelled' WHERE id = ?`,
+        [auction.product_id]
+      );
+
+      // Notify seller
+      await connection.execute(
+        `INSERT INTO notification (user_id, auction_id, title, message)
+         VALUES (?, ?, 'Đấu giá bị từ chối', ?)`,
+        [auction.seller_id, id, `Phiên đấu giá "${auction.product_title}" đã bị từ chối. Lý do: ${reason}`]
+      );
+
+      await connection.commit();
+      connection.release();
+
+      res.json({ message: 'Từ chối thành công', auctionId: id });
+    } catch (e) {
+      await connection.rollback();
+      connection.release();
+      console.error(e);
+      res.status(500).json({ message: 'Từ chối thất bại' });
     }
   },
 };

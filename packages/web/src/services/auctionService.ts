@@ -7,9 +7,6 @@ export interface AuctionFilters {
   category?: string;
   search?: string;
   limit?: number;
-  statusId?: number;
-  categoryId?: number;
-  sellerId?: number;
 }
 
 export const auctionService = {
@@ -19,9 +16,6 @@ export const auctionService = {
     if (filters.category) p.set('category', filters.category);
     if (filters.search) p.set('search', filters.search);
     if (filters.limit != null) p.set('limit', String(filters.limit));
-    if (filters.statusId != null) p.set('statusId', String(filters.statusId));
-    if (filters.categoryId != null) p.set('categoryId', String(filters.categoryId));
-    if (filters.sellerId != null) p.set('sellerId', String(filters.sellerId));
     const q = p.toString();
     const rows = await api<Record<string, unknown>[]>(`/api/auctions${q ? `?${q}` : ''}`);
     return rows.map(parseAuction);
@@ -42,13 +36,8 @@ export const auctionService = {
     return rows.map(parseAuction);
   },
 
-  async getNewAuctions(limit = 12): Promise<Auction[]> {
-    const rows = await api<Record<string, unknown>[]>(`/api/auctions/new?limit=${limit}`);
-    return rows.map(parseAuction);
-  },
-
   async getAuctionBidHistory(auctionId: string): Promise<
-    { id: string; auctionId: string; userId: string; userName: string; bidAmount: number; bidTime: string }[]
+    { amount: number; time: string; userLabel: string }[]
   > {
     return api(`/api/auctions/${encodeURIComponent(auctionId)}/bids`);
   },
@@ -77,12 +66,9 @@ export const auctionService = {
   },
 
   async getWonAuctions(): Promise<{
-    wonAuctions: (Auction & { winningBid?: Bid; transactionStatus?: string })[];
+    wonAuctions: (Auction & { winningBid?: Bid; transactionStatus?: string; paymentMethod?: string })[];
   }> {
-    const res = await api<Record<string, unknown>[]>('/api/bids/won');
-    return {
-      wonAuctions: res.map(parseAuction) as (Auction & { winningBid?: Bid; transactionStatus?: string })[],
-    };
+    return api('/api/bids/won');
   },
 
   async adminListAuctions(): Promise<Auction[]> {
@@ -90,30 +76,28 @@ export const auctionService = {
     return rows.map(parseAuction);
   },
 
-  async adminCreateAuction(payload: {
-    productId?: number;
-    sellerId?: number;
-    startPrice?: number;
-    bidIncrement?: number;
-    durationMinutes?: number;
-    statusId?: number;
-    endTime?: string;
-  }): Promise<Auction> {
+  async adminCreateAuction(payload: Partial<Auction> & { endTime?: string }): Promise<Auction> {
     const row = await api<Record<string, unknown>>('/api/admin/auctions', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        title: payload.title,
+        description: payload.description,
+        image: payload.image,
+        category: payload.category,
+        startingBid: payload.startingBid,
+        minIncrement: payload.minIncrement,
+        status: payload.status,
+        seller: payload.seller,
+        endTime: payload.endTime,
+      }),
     });
     return parseAuction(row);
   },
 
-  async adminUpdateAuction(id: string, payload: Partial<{
-    startPrice: number;
-    currentPrice: number;
-    bidIncrement: number;
-    statusId: number;
-    endTime: string;
-    winnerId: number | null;
-  }>): Promise<Auction> {
+  async adminUpdateAuction(
+    id: string,
+    payload: Partial<Auction> & { endTime?: string }
+  ): Promise<Auction> {
     const row = await api<Record<string, unknown>>(`/api/admin/auctions/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
@@ -122,6 +106,18 @@ export const auctionService = {
   },
 
   async adminDeleteAuction(id: string): Promise<void> {
+    await api(`/api/admin/auctions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
+  async updateAuction(id: number, payload: Partial<Auction> & { endTime?: string }): Promise<Auction> {
+    const row = await api<Record<string, unknown>>(`/api/admin/auctions/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    return parseAuction(row);
+  },
+
+  async deleteAuction(id: number): Promise<void> {
     await api(`/api/admin/auctions/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
@@ -145,31 +141,5 @@ export const auctionService = {
       method: 'POST',
     });
     return res;
-  },
-
-  /** User-facing: update own auction */
-  async updateAuction(
-    id: string,
-    payload: Partial<{
-      title: string;
-      description: string;
-      category: string;
-      startingBid: number;
-      minIncrement: number;
-      seller: string;
-      image: string;
-      endTime: string;
-    }>
-  ): Promise<Auction> {
-    const row = await api<Record<string, unknown>>(`/api/admin/auctions/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    });
-    return parseAuction(row);
-  },
-
-  /** User-facing: delete own auction */
-  async deleteAuction(id: string): Promise<void> {
-    await api(`/api/admin/auctions/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 };

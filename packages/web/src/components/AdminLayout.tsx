@@ -10,6 +10,8 @@ import {
   Menu,
   X,
   BarChart3,
+  Palette,
+  Package,
 } from 'lucide-react';
 import { Button } from './ui/button';
 
@@ -19,17 +21,17 @@ export function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const isActive = (path: string) => {
-    if (path === '/admin' && location.pathname === '/admin') return true;
-    if (path !== '/admin' && location.pathname.startsWith(path)) return true;
-    return false;
+    return location.pathname === path;
   };
 
   const navigation = [
     { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
     { name: 'Quản lý đấu giá', path: '/admin/auctions', icon: Gavel },
+    { name: 'Quản lý danh mục', path: '/admin/categories', icon: Package },
     { name: 'Quản lý người dùng', path: '/admin/users', icon: Users },
     { name: 'Quản lý giao dịch', path: '/admin/transactions', icon: Receipt },
     { name: 'Báo cáo & Thống kê', path: '/admin/reports', icon: BarChart3 },
+    { name: 'Tùy chỉnh giao diện', path: '/admin/theme', icon: Palette },
     { name: 'Cài đặt', path: '/admin/settings', icon: Settings },
   ];
 
@@ -49,7 +51,7 @@ export function AdminLayout() {
                 {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
               </Button>
               <div className="flex items-center gap-2">
-                <img src="/favicon2.jpg" alt="Logo" className="h-10 w-auto" />
+                <Gavel className="h-8 w-8 text-blue-600" />
                 <div>
                   <div className="text-xl font-bold text-gray-900">Admin Panel</div>
                   <div className="text-xs text-gray-500">Đấu Giá Trực Tuyến</div>

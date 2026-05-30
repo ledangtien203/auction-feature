@@ -7,7 +7,7 @@ import fs from 'fs';
 const workspaceRoot = path.resolve(process.cwd(), '../../');
 dotenv.config({ path: path.join(workspaceRoot, 'packages/.env') });
 
-const schemaPath = path.join(workspaceRoot, 'packages/database/schema.sql');
+const schemaPath = path.join(workspaceRoot, 'database/schema.sql');
 
 const config = {
   host: process.env.MYSQL_HOST || '127.0.0.1',
@@ -46,7 +46,7 @@ async function seed() {
     
     console.log('📥 Importing schema and seed data...');
     
-    // Execute schema
+    // Execute schema (includes all unique constraints)
     await connection.query('USE auction_system');
     await connection.query(schemaSql);
     
@@ -58,6 +58,7 @@ async function seed() {
     console.log('   - Tables created: role, user, product_category, product, auction_status, auction_time,');
     console.log('                    auction, auction_history, transaction_history, notification, comment,');
     console.log('                    action_logs, settings');
+    console.log('   - Unique constraints: product_active, payment_auction, unique_bid');
     console.log('');
     console.log('🔑 Test Accounts:');
     console.log('   Admin: admin@daugia.com / admin123');

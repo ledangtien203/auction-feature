@@ -38,4 +38,9 @@ router.put('/settings', adminController.updateSettings);
 // System
 router.get('/reports/stats', adminController.getReportStats);
 
+// Auction moderation (pending approval)
+router.get('/auctions/pending', adminController.getPendingAuctions);
+router.post('/auctions/:id/approve', adminController.approveAuction);
+router.post('/auctions/:id/reject', adminController.rejectAuction);
+
 export default router;

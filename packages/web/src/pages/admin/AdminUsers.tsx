@@ -12,100 +12,33 @@ import {
   TableHeader,
   TableRow,
 } from '../../components/ui/table';
-import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationLink,
-  PaginationPrevious,
-  PaginationNext,
-} from '../../components/ui/pagination';
-import { api } from '../../lib/api';
+import { userService } from '../../services/userService';
+import type { User } from '../../types/user';
 import { toast } from 'sonner';
 import { broadcastSyncEvent } from '../../lib/syncStorage';
 
-interface AdminUser {
-  id: string;
-  username: string;
-  email: string;
-  name: string | null;
-  phone: string | null;
-  avatar: string | null;
-  roleId: string;
-  roleName: string | null;
-  isVerified: boolean;
-  isBlocked: boolean;
-  balance: number;
-  rating: number;
-  createdAt: string;
-  totalBids: number;
-  totalSpent: number;
-  role: string;
-  status: string;
-  joinDate: string;
-}
-
-const PAGE_SIZE = 10;
-
 export function AdminUsers() {
-  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalUsers, setTotalUsers] = useState(0);
-
-  const loadUsers = async () => {
-    setLoading(true);
-    try {
-      const data = await api<AdminUser[]>('/api/admin/users');
-      setUsers(data);
-      setTotalUsers(data.length);
-    } catch {
-      toast.error('Không tải được danh sách người dùng');
-      setUsers([]);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   useEffect(() => {
-    loadUsers();
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await userService.getUsers();
+        if (!cancelled) setUsers(list);
+      } catch {
+        if (!cancelled) setUsers([]);
+        toast.error('Không tải được danh sách người dùng');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
-
-  const handleToggleStatus = async (userId: string) => {
-    try {
-      await api(`/api/admin/users/${userId}/status`, { method: 'PATCH' });
-      await loadUsers();
-      broadcastSyncEvent('users');
-      toast.success('Đã cập nhật trạng thái người dùng');
-    } catch {
-      toast.error('Cập nhật thất bại');
-    }
-  };
-
-  const filteredUsers = users.filter(
-    (user) =>
-      (user.name || user.username).toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const totalPages = Math.ceil(filteredUsers.length / PAGE_SIZE);
-  const paginatedUsers = filteredUsers.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE
-  );
-
-  // Reset to page 1 when search changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery]);
-
-  const stats = {
-    total: users.length,
-    active: users.filter((u) => !u.isBlocked).length,
-    suspended: users.filter((u) => u.isBlocked).length,
-    admins: users.filter((u) => u.role === 'admin').length,
-  };
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('vi-VN', {
@@ -115,8 +48,32 @@ export function AdminUsers() {
     }).format(amount);
   };
 
-  const formatDate = (date: string) => {
-    return new Intl.DateTimeFormat('vi-VN').format(new Date(date));
+  const formatDate = (date: Date) => {
+    return new Intl.DateTimeFormat('vi-VN').format(date);
+  };
+
+  const handleToggleStatus = async (userId: string) => {
+    try {
+      const updated = await userService.toggleUserStatus(userId);
+      setUsers((prev) => prev.map((u) => (u.id === userId ? updated : u)));
+      broadcastSyncEvent('users');
+      toast.success('Đã cập nhật trạng thái người dùng');
+    } catch {
+      toast.error('Cập nhật thất bại');
+    }
+  };
+
+  const filteredUsers = users.filter(
+    (user) =>
+      user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      user.email.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const stats = {
+    total: users.length,
+    active: users.filter((u) => u.status === 'active').length,
+    suspended: users.filter((u) => u.status === 'suspended').length,
+    admins: users.filter((u) => u.role === 'admin').length,
   };
 
   return (
@@ -214,136 +171,80 @@ export function AdminUsers() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paginatedUsers.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                        Không có người dùng nào
+                  {filteredUsers.map((user) => (
+                    <TableRow key={user.id} className="hover:bg-accent/5">
+                      <TableCell>
+                        <div>
+                          <div className="font-medium">{user.name}</div>
+                          <div className="text-sm text-muted-foreground">{user.email}</div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={user.role === 'admin' ? 'default' : 'secondary'}
+                          className={
+                            user.role === 'admin'
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-muted text-muted-foreground'
+                          }
+                        >
+                          {user.role === 'admin' ? 'Quản trị viên' : 'Người dùng'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm">{formatDate(user.joinDate)}</TableCell>
+                      <TableCell>
+                        <span className="font-semibold">{user.totalBids}</span> lượt
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {formatCurrency(user.totalSpent)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={user.status === 'active' ? 'default' : 'destructive'}
+                          className={
+                            user.status === 'active' ? 'bg-success text-success-foreground' : ''
+                          }
+                        >
+                          {user.status === 'active' ? 'Hoạt động' : 'Đình chỉ'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="Gửi email"
+                            className="hover:bg-accent/10 hover:text-accent"
+                          >
+                            <Mail className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleToggleStatus(user.id)}
+                            title={
+                              user.status === 'active'
+                                ? 'Đình chỉ người dùng'
+                                : 'Kích hoạt người dùng'
+                            }
+                            className={
+                              user.status === 'active'
+                                ? 'hover:bg-destructive/10 hover:text-destructive'
+                                : 'hover:bg-success/10 hover:text-success'
+                            }
+                          >
+                            {user.status === 'active' ? (
+                              <UserX className="h-4 w-4" />
+                            ) : (
+                              <UserCheck className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
-                  ) : (
-                    paginatedUsers.map((user) => (
-                      <TableRow key={user.id} className="hover:bg-accent/5">
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            {user.avatar ? (
-                              <img
-                                src={user.avatar}
-                                alt={user.name || user.username}
-                                className="w-10 h-10 rounded-full object-cover"
-                              />
-                            ) : (
-                              <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
-                                {(user.name || user.username).charAt(0).toUpperCase()}
-                              </div>
-                            )}
-                            <div>
-                              <div className="font-medium">{user.name || user.username}</div>
-                              <div className="text-sm text-muted-foreground">{user.email}</div>
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={user.role === 'admin' ? 'default' : 'secondary'}
-                            className={
-                              user.role === 'admin'
-                                ? 'bg-primary text-primary-foreground'
-                                : 'bg-muted text-muted-foreground'
-                            }
-                          >
-                            {user.role === 'admin' ? 'Quản trị viên' : 'Người dùng'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-sm">{formatDate(user.createdAt)}</TableCell>
-                        <TableCell>
-                          <span className="font-semibold">{user.totalBids}</span> lượt
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          {formatCurrency(user.totalSpent)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={!user.isBlocked ? 'default' : 'destructive'}
-                            className={
-                              !user.isBlocked ? 'bg-success text-success-foreground' : ''
-                            }
-                          >
-                            {!user.isBlocked ? 'Hoạt động' : 'Đình chỉ'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              title="Gửi email"
-                              className="hover:bg-accent/10 hover:text-accent"
-                            >
-                              <Mail className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleToggleStatus(user.id)}
-                              title={
-                                !user.isBlocked
-                                  ? 'Đình chỉ người dùng'
-                                  : 'Kích hoạt người dùng'
-                              }
-                              className={
-                                !user.isBlocked
-                                  ? 'hover:bg-destructive/10 hover:text-destructive'
-                                  : 'hover:bg-success/10 hover:text-success'
-                              }
-                            >
-                              {!user.isBlocked ? (
-                                <UserX className="h-4 w-4" />
-                              ) : (
-                                <UserCheck className="h-4 w-4" />
-                              )}
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
+                  ))}
                 </TableBody>
               </Table>
-
-              {totalPages > 1 && (
-                <div className="mt-4">
-                  <Pagination>
-                    <PaginationContent>
-                      <PaginationItem>
-                        <PaginationPrevious
-                          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                          className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                        />
-                      </PaginationItem>
-                      {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-                        const page = i + 1;
-                        return (
-                          <PaginationItem key={page}>
-                            <PaginationLink
-                              isActive={currentPage === page}
-                              onClick={() => setCurrentPage(page)}
-                              className="cursor-pointer"
-                            >
-                              {page}
-                            </PaginationLink>
-                          </PaginationItem>
-                        );
-                      })}
-                      <PaginationItem>
-                        <PaginationNext
-                          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                          className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                        />
-                      </PaginationItem>
-                    </PaginationContent>
-                  </Pagination>
-                </div>
-              )}
             </CardContent>
           </Card>
         </>

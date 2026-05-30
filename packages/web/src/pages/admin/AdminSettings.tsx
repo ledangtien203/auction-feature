@@ -6,13 +6,11 @@ import { Button } from '../../components/ui/button';
 import { Switch } from '../../components/ui/switch';
 import { Separator } from '../../components/ui/separator';
 import { toast } from 'sonner';
-import { api } from '../../lib/api';
 
 interface AdminSettingsState {
   siteName: string;
   siteEmail: string;
   supportPhone: string;
-  address: string;
   minBidIncrement: number;
   auctionDuration: number;
   commissionRate: number;
@@ -26,11 +24,12 @@ interface AdminSettingsState {
   accountName: string;
 }
 
+const STORAGE_KEY = 'adminSettings';
+
 const defaultSettings: AdminSettingsState = {
   siteName: 'Đấu Giá Trực Tuyến',
   siteEmail: 'contact@daugia.com',
   supportPhone: '1900 1234',
-  address: '',
   minBidIncrement: 100000,
   auctionDuration: 72,
   commissionRate: 10,
@@ -39,45 +38,36 @@ const defaultSettings: AdminSettingsState = {
   notifyEmail: true,
   notifyOverbid: true,
   notifyEndingSoon: true,
-  bankName: '',
-  accountNumber: '',
-  accountName: '',
+  bankName: 'Vietcombank',
+  accountNumber: '1234567890',
+  accountName: 'CONG TY DAU GIA TRUC TUYEN',
 };
 
 export function AdminSettings() {
-  const [settings, setSettings] = useState<AdminSettingsState>(defaultSettings);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState<AdminSettingsState>(() => {
+    if (typeof window === 'undefined') return defaultSettings;
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      return stored ? (JSON.parse(stored) as AdminSettingsState) : defaultSettings;
+    } catch {
+      return defaultSettings;
+    }
+  });
 
   useEffect(() => {
-    loadSettings();
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        setSettings(JSON.parse(stored) as AdminSettingsState);
+      }
+    } catch {
+      // ignore invalid saved values
+    }
   }, []);
 
-  const loadSettings = async () => {
-    setLoading(true);
-    try {
-      const data = await api<AdminSettingsState>('/api/admin/settings');
-      setSettings(data);
-    } catch {
-      toast.error('Không tải được cài đặt');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await api('/api/admin/settings', {
-        method: 'PUT',
-        body: JSON.stringify(settings),
-      });
-      toast.success('Đã lưu cài đặt thành công');
-    } catch {
-      toast.error('Lưu cài đặt thất bại');
-    } finally {
-      setSaving(false);
-    }
+  const handleSave = () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    toast.success('Đã lưu cài đặt thành công');
   };
 
   const handleReset = () => {
@@ -92,15 +82,11 @@ export function AdminSettings() {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
-  if (loading) {
-    return <div className="py-20 text-center text-muted-foreground">Đang tải…</div>;
-  }
-
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
         <h1 className="text-3xl font-bold mb-2">Cài đặt hệ thống</h1>
-        <p className="text-muted-foreground">Quản lý cấu hình hệ thống đấu giá</p>
+        <p className="text-gray-600">Quản lý cấu hình hệ thống đấu giá</p>
       </div>
 
       {/* General Settings */}
@@ -135,15 +121,6 @@ export function AdminSettings() {
               value={settings.supportPhone}
               onChange={(e) => updateSetting('supportPhone', e.target.value)}
               placeholder="Nhập số điện thoại"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="address">Địa chỉ</Label>
-            <Input
-              id="address"
-              value={settings.address}
-              onChange={(e) => updateSetting('address', e.target.value)}
-              placeholder="Nhập địa chỉ công ty"
             />
           </div>
         </CardContent>
@@ -190,7 +167,7 @@ export function AdminSettings() {
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label>Tự động gia hạn đấu giá</Label>
-              <div className="text-sm text-muted-foreground">
+              <div className="text-sm text-gray-500">
                 Gia hạn thời gian nếu có giá đặt trong phút cuối
               </div>
             </div>
@@ -202,7 +179,7 @@ export function AdminSettings() {
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label>Yêu cầu xác minh người dùng</Label>
-              <div className="text-sm text-muted-foreground">
+              <div className="text-sm text-gray-500">
                 Người dùng phải xác minh danh tính trước khi đặt giá
               </div>
             </div>
@@ -223,7 +200,7 @@ export function AdminSettings() {
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label>Thông báo email</Label>
-              <div className="text-sm text-muted-foreground">Gửi email thông báo cho người dùng</div>
+              <div className="text-sm text-gray-500">Gửi email thông báo cho người dùng</div>
             </div>
             <Switch
               checked={settings.notifyEmail}
@@ -233,7 +210,7 @@ export function AdminSettings() {
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label>Thông báo khi bị vượt giá</Label>
-              <div className="text-sm text-muted-foreground">Thông báo khi có người đặt giá cao hơn</div>
+              <div className="text-sm text-gray-500">Thông báo khi có người đặt giá cao hơn</div>
             </div>
             <Switch
               checked={settings.notifyOverbid}
@@ -243,7 +220,7 @@ export function AdminSettings() {
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label>Thông báo sắp kết thúc</Label>
-              <div className="text-sm text-muted-foreground">Nhắc nhở trước khi đấu giá kết thúc 1 giờ</div>
+              <div className="text-sm text-gray-500">Nhắc nhở trước khi đấu giá kết thúc 1 giờ</div>
             </div>
             <Switch
               checked={settings.notifyEndingSoon}
@@ -292,11 +269,9 @@ export function AdminSettings() {
       {/* Save Button */}
       <div className="flex justify-end gap-4">
         <Button variant="outline" onClick={handleReset}>
-          Đặt lại
+          Hủy
         </Button>
-        <Button onClick={handleSave} disabled={saving}>
-          {saving ? 'Đang lưu...' : 'Lưu cài đặt'}
-        </Button>
+        <Button onClick={handleSave}>Lưu cài đặt</Button>
       </div>
     </div>
   );

@@ -23,16 +23,9 @@ import {
 } from '../components/ui/select';
 import { auctionService } from '../services/auctionService';
 import { readStoredUser } from '../services/authService';
-import { api } from '../lib/api';
-import { parseAuction } from '../lib/normalize';
 import type { Auction } from '../types/auction';
 import { toast } from 'sonner';
 import { broadcastSyncEvent } from '../lib/syncStorage';
-
-interface Category {
-  id: number;
-  name: string;
-}
 
 function toDatetimeLocalValue(d: Date) {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -48,16 +41,18 @@ function formatCurrency(amount: number) {
   }).format(amount);
 }
 
-function getStatusBadge(statusId: number) {
-  switch (statusId) {
-    case 1:
+function getStatusBadge(status: string) {
+  switch (status) {
+    case 'upcoming':
+      return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />Sắp bắt đầu</Badge>;
+    case 'active':
       return <Badge variant="default"><Gavel className="h-3 w-3 mr-1" />Đang đấu giá</Badge>;
-    case 2:
+    case 'ended':
       return <Badge variant="outline"><CheckCircle2 className="h-3 w-3 mr-1" />Đã kết thúc</Badge>;
-    case 3:
-      return <Badge variant="destructive"><Clock className="h-3 w-3 mr-1" />Đã hủy</Badge>;
+    case 'completed':
+      return <Badge variant="default" className="bg-green-600"><CheckCircle2 className="h-3 w-3 mr-1" />Hoàn thành</Badge>;
     default:
-      return <Badge>{statusId}</Badge>;
+      return <Badge>{status}</Badge>;
   }
 }
 
@@ -66,7 +61,6 @@ export function MyAuctions() {
   const user = readStoredUser();
 
   const [auctions, setAuctions] = useState<Auction[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -77,10 +71,9 @@ export function MyAuctions() {
   const [form, setForm] = useState({
     title: '',
     description: '',
-    category: '',
+    category: 'Đồng hồ',
     startingBid: 0,
-    bidIncrement: 1000,
-    minIncrement: 1000,
+    minIncrement: 1000000,
     seller: '',
     image: '',
     endTimeLocal: toDatetimeLocalValue(new Date(Date.now() + 86400000 * 7)),
@@ -96,15 +89,9 @@ export function MyAuctions() {
 
   const load = async () => {
     try {
-      const [auctionList, cats] = await Promise.all([
-        api<Auction[]>(`/api/user-dashboard/auctions`),
-        api<Category[]>('/api/admin/categories'),
-      ]);
-      setAuctions(auctionList.map(parseAuction));
-      setCategories(cats);
-      if (cats.length > 0 && !form.category) {
-        setForm(f => ({ ...f, category: cats[0].name }));
-      }
+      const list = await auctionService.getAuctions();
+      const mine = list.filter(a => a.seller === user?.name || a.seller === user?.email);
+      setAuctions(mine);
     } catch {
       toast.error('Không tải được danh sách');
     } finally {
@@ -117,11 +104,10 @@ export function MyAuctions() {
     setForm({
       title: '',
       description: '',
-      category: categories[0]?.name || '',
+      category: 'Đồng hồ',
       startingBid: 0,
-      bidIncrement: 1000,
-      minIncrement: 1000,
-      seller: user?.username || '',
+      minIncrement: 1000000,
+      seller: user?.name || '',
       image: '',
       endTimeLocal: toDatetimeLocalValue(new Date(Date.now() + 86400000 * 7)),
     });
@@ -133,10 +119,9 @@ export function MyAuctions() {
     setForm({
       title: auction.title,
       description: auction.description || '',
-      category: auction.category || categories[0]?.name || '',
-      startingBid: Number(auction.startPrice) || 0,
-      bidIncrement: Number(auction.bidIncrement) || 1000,
-      minIncrement: Number(auction.bidIncrement) || 1000,
+      category: auction.category || 'Đồng hồ',
+      startingBid: Number(auction.startingBid) || 0,
+      minIncrement: Number(auction.minIncrement) || 1000000,
       seller: auction.seller || user?.name || '',
       image: auction.image || '',
       endTimeLocal: auction.endTime
@@ -147,43 +132,36 @@ export function MyAuctions() {
   };
 
   const handleSave = async () => {
-    if (!form.title.trim()) {
-      toast.error('Tiêu đề sản phẩm là bắt buộc');
+    if (!form.title.trim() || !form.image.trim()) {
+      toast.error('Tiêu đề và URL ảnh là bắt buộc');
       return;
     }
     setSaving(true);
     try {
       const endIso = new Date(form.endTimeLocal).toISOString();
-      // Find categoryId from name
-      const cat = categories.find(c => c.name === form.category);
-      const categoryId = cat?.id;
-
       if (editingAuction) {
-        await api(`/api/user-dashboard/auctions/${editingAuction.id}`, {
-          method: 'PUT',
-          body: JSON.stringify({
-            title: form.title,
-            description: form.description,
-            image: form.image,
-            categoryId: categoryId,
-            startPrice: form.startingBid,
-            bidIncrement: form.bidIncrement,
-            endTime: endIso,
-          }),
+        await auctionService.updateAuction(editingAuction.id, {
+          title: form.title,
+          description: form.description,
+          category: form.category,
+          startingBid: form.startingBid,
+          minIncrement: form.minIncrement,
+          seller: form.seller || user?.name || '—',
+          image: form.image,
+          endTime: endIso,
         });
         toast.success('Cập nhật thành công!');
       } else {
-        await api('/api/user-dashboard/auctions', {
-          method: 'POST',
-          body: JSON.stringify({
-            title: form.title,
-            description: form.description,
-            categoryId: categoryId,
-            image: form.image,
-            startPrice: form.startingBid,
-            bidIncrement: form.bidIncrement,
-            durationMinutes: 60,
-          }),
+        await auctionService.adminCreateAuction({
+          title: form.title,
+          description: form.description,
+          category: form.category,
+          startingBid: form.startingBid,
+          minIncrement: form.minIncrement,
+          seller: form.seller || user?.name || '—',
+          image: form.image,
+          endTime: endIso,
+          status: 'upcoming',
         });
         toast.success('Tạo phiên đấu giá thành công!');
       }
@@ -199,7 +177,7 @@ export function MyAuctions() {
 
   const handleDelete = async (id: number) => {
     try {
-      await api(`/api/user-dashboard/auctions/${id}`, { method: 'DELETE' });
+      await auctionService.deleteAuction(id);
       toast.success('Xóa thành công!');
       broadcastSyncEvent('auctions');
       setDeleteConfirm(null);
@@ -289,12 +267,12 @@ export function MyAuctions() {
                         </div>
                       </td>
                       <td className="py-3 px-2 text-sm">{auction.category || '—'}</td>
-                      <td className="py-3 px-2 text-right text-sm">{formatCurrency(Number(auction.startPrice))}</td>
+                      <td className="py-3 px-2 text-right text-sm">{formatCurrency(Number(auction.startingBid))}</td>
                       <td className="py-3 px-2 text-right text-sm font-medium">
-                        {formatCurrency(Number(auction.currentPrice) || Number(auction.startPrice))}
+                        {formatCurrency(Number(auction.currentBid) || Number(auction.startingBid))}
                       </td>
-                      <td className="py-3 px-2 text-center text-sm">{auction.totalBids || 0}</td>
-                      <td className="py-3 px-2 text-center">{getStatusBadge(auction.statusId)}</td>
+                      <td className="py-3 px-2 text-center text-sm">{auction.bids?.length || 0}</td>
+                      <td className="py-3 px-2 text-center">{getStatusBadge(auction.status || 'upcoming')}</td>
                       <td className="py-3 px-2 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <Button
@@ -308,7 +286,7 @@ export function MyAuctions() {
                             variant="ghost"
                             size="icon"
                             onClick={() => openEdit(auction)}
-                            disabled={auction.statusId === 2}
+                            disabled={auction.status === 'completed'}
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
@@ -363,9 +341,16 @@ export function MyAuctions() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {categories.map((cat) => (
-                      <SelectItem key={cat.id} value={cat.name}>{cat.name}</SelectItem>
-                    ))}
+                    <SelectItem value="Đồng hồ">Đồng hồ</SelectItem>
+                    <SelectItem value="Máy ảnh">Máy ảnh</SelectItem>
+                    <SelectItem value="Nội thất">Nội thất</SelectItem>
+                    <SelectItem value="Trang sức">Trang sức</SelectItem>
+                    <SelectItem value="Xe cổ">Xe cổ</SelectItem>
+                    <SelectItem value="Nghệ thuật">Nghệ thuật</SelectItem>
+                    <SelectItem value="Thời trang">Thời trang</SelectItem>
+                    <SelectItem value="Sưu tầm">Sưu tầm</SelectItem>
+                    <SelectItem value="Rượu vang">Rượu vang</SelectItem>
+                    <SelectItem value="Nhạc cụ">Nhạc cụ</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -393,8 +378,8 @@ export function MyAuctions() {
                 <Input
                   type="number"
                   placeholder="1000000"
-                  value={form.bidIncrement || ''}
-                  onChange={(e) => setForm(f => ({ ...f, bidIncrement: Number(e.target.value) || 0, minIncrement: Number(e.target.value) || 0 }))}
+                  value={form.minIncrement || ''}
+                  onChange={(e) => setForm(f => ({ ...f, minIncrement: Number(e.target.value) || 0 }))}
                 />
               </div>
             </div>

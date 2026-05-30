@@ -145,4 +145,46 @@ export const authController = {
       res.status(500).json({ message: 'Cập nhật thất bại' });
     }
   },
+
+  async changePassword(req, res) {
+    try {
+      const { currentPassword, newPassword } = req.body || {};
+      
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ message: 'Vui lòng nhập đầy đủ thông tin' });
+      }
+
+      if (newPassword.length < 6) {
+        return res.status(400).json({ message: 'Mật khẩu mới phải có ít nhất 6 ký tự' });
+      }
+
+      // Get current user
+      const [users] = await pool.execute(
+        'SELECT password_hash FROM user WHERE id = ?',
+        [req.user.id]
+      );
+
+      if (!users[0]) {
+        return res.status(404).json({ message: 'Không tìm thấy người dùng' });
+      }
+
+      // Verify current password
+      const match = await bcrypt.compare(currentPassword, users[0].password_hash);
+      if (!match) {
+        return res.status(400).json({ message: 'Mật khẩu hiện tại không đúng' });
+      }
+
+      // Update password
+      const hash = await bcrypt.hash(newPassword, 10);
+      await pool.execute(
+        'UPDATE user SET password_hash = ? WHERE id = ?',
+        [hash, req.user.id]
+      );
+
+      res.json({ message: 'Đổi mật khẩu thành công' });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ message: 'Đổi mật khẩu thất bại' });
+    }
+  },
 };

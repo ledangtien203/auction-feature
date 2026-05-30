@@ -8,13 +8,29 @@ const pool = getPool();
 
 router.use(authRequired);
 
+// Simple test endpoint (no auth required)
+router.get('/test', async (req, res) => {
+  res.json({ ok: true, message: 'API is working' });
+});
+
 // Stats
 router.get('/stats', async (req, res) => {
   try {
     const userId = req.user.id;
     
+    // Helper function to safely execute query
+    const safeQuery = async (sql, params = []) => {
+      try {
+        const [rows] = await pool.execute(sql, params);
+        return rows;
+      } catch (e) {
+        console.error('Query error:', sql.substring(0, 50), e.message);
+        return [];
+      }
+    };
+    
     // Active bids count
-    const [activeBids] = await pool.execute(
+    const activeBidsRows = await safeQuery(
       `SELECT COUNT(DISTINCT h.auction_id) as count
        FROM auction_history h
        JOIN auction a ON a.id = h.auction_id
@@ -23,19 +39,19 @@ router.get('/stats', async (req, res) => {
     );
 
     // Won auctions count
-    const [wonAuctions] = await pool.execute(
+    const wonAuctionsRows = await safeQuery(
       `SELECT COUNT(*) as count FROM auction WHERE winner_id = ?`,
       [userId]
     );
 
     // My auctions count
-    const [myAuctions] = await pool.execute(
+    const myAuctionsRows = await safeQuery(
       `SELECT COUNT(*) as count FROM auction WHERE seller_id = ?`,
       [userId]
     );
 
     // Pending payments count
-    const [pendingPayments] = await pool.execute(
+    const pendingPaymentsRows = await safeQuery(
       `SELECT COUNT(*) as count 
        FROM transaction_history t
        JOIN auction a ON a.id = t.auction_id
@@ -44,13 +60,13 @@ router.get('/stats', async (req, res) => {
     );
 
     // Watched auctions count
-    const [watchedAuctions] = await pool.execute(
+    const watchedAuctionsRows = await safeQuery(
       `SELECT COUNT(*) as count FROM watchlist WHERE user_id = ?`,
       [userId]
     );
 
     // Recent bids
-    const [recentBids] = await pool.execute(
+    const recentBids = await safeQuery(
       `SELECT h.*, p.title AS auction_title, a.current_price, a.status_id
        FROM auction_history h
        JOIN auction a ON a.id = h.auction_id
@@ -61,18 +77,19 @@ router.get('/stats', async (req, res) => {
       [userId]
     );
 
-    // Get winning status for each bid
-    const recentBidsWithStatus = await Promise.all(
-      recentBids.map(async (bid) => {
-        const [topBid] = await pool.execute(
+    // Get winning status for each bid (simplified)
+    const recentBidsWithStatus = [];
+    for (const bid of recentBids) {
+      try {
+        const topBidRows = await safeQuery(
           `SELECT user_id, bid_amount FROM auction_history 
            WHERE auction_id = ? ORDER BY bid_amount DESC LIMIT 1`,
           [bid.auction_id]
         );
-        const isWinning = topBid[0] && 
-          Number(topBid[0].user_id) === userId && 
-          Number(topBid[0].bid_amount) === Number(bid.bid_amount);
-        return {
+        const isWinning = topBidRows[0] && 
+          Number(topBidRows[0].user_id) === Number(userId) && 
+          Number(topBidRows[0].bid_amount) === Number(bid.bid_amount);
+        recentBidsWithStatus.push({
           id: String(bid.id),
           auctionId: String(bid.auction_id),
           userId: String(bid.user_id),
@@ -82,12 +99,14 @@ router.get('/stats', async (req, res) => {
           currentPrice: Number(bid.current_price),
           statusId: Number(bid.status_id),
           isWinning: Boolean(isWinning),
-        };
-      })
-    );
+        });
+      } catch (e) {
+        console.error('Error processing bid:', e.message);
+      }
+    }
 
     // My auctions (recent)
-    const [myAuctionsList] = await pool.execute(
+    const myAuctionsList = await safeQuery(
       `SELECT a.*, p.title, p.image,
               (SELECT COUNT(*) FROM auction_history h WHERE h.auction_id = a.id) as total_bids
        FROM auction a
@@ -110,17 +129,17 @@ router.get('/stats', async (req, res) => {
     }));
 
     res.json({
-      activeBids: Number(activeBids[0]?.count || 0),
-      wonAuctions: Number(wonAuctions[0]?.count || 0),
-      myAuctions: Number(myAuctions[0]?.count || 0),
-      pendingPayments: Number(pendingPayments[0]?.count || 0),
-      watchedAuctions: Number(watchedAuctions[0]?.count || 0),
+      activeBids: Number(activeBidsRows[0]?.count || 0),
+      wonAuctions: Number(wonAuctionsRows[0]?.count || 0),
+      myAuctions: Number(myAuctionsRows[0]?.count || 0),
+      pendingPayments: Number(pendingPaymentsRows[0]?.count || 0),
+      watchedAuctions: Number(watchedAuctionsRows[0]?.count || 0),
       recentBids: recentBidsWithStatus,
       myAuctionsList: myAuctionsFormatted,
     });
   } catch (e) {
     console.error('User stats error:', e);
-    res.status(500).json({ message: 'Lỗi khi lấy dữ liệu' });
+    res.status(500).json({ message: 'Lỗi khi lấy dữ liệu: ' + e.message });
   }
 });
 
@@ -159,9 +178,10 @@ router.post('/auctions', async (req, res) => {
     const startPrice = Number(b.startPrice || b.startingBid);
     const bidIncrement = Number(b.bidIncrement || b.minIncrement || 1000);
     const durationMinutes = Number(b.durationMinutes || 15);
-    const statusId = Number(b.statusId || 1);
+    // Default to pending status (5) - requires admin approval
+    const statusId = 5;
 
-    if (!b.name && !b.title && !b.productId) {
+    if (!b.title && !b.name && !b.productId) {
       return res.status(400).json({ message: 'Thiếu thông tin sản phẩm' });
     }
     if (!startPrice) {
@@ -172,7 +192,7 @@ router.post('/auctions', async (req, res) => {
     if (!productId) {
       const [prodResult] = await pool.execute(
         `INSERT INTO product (name, title, description, category_id, image, start_price, status, seller_id)
-         VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
         [
           b.name || b.title,
           b.title || b.name,
@@ -187,10 +207,28 @@ router.post('/auctions', async (req, res) => {
     }
 
     const [r] = await pool.execute(
-      `INSERT INTO auction (product_id, seller_id, start_price, current_price, bid_increment, start_time, end_time, duration_minutes, status_id)
-       VALUES (?, ?, ?, ?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? MINUTE), ?, ?)`,
-      [productId, userId, startPrice, startPrice, bidIncrement, durationMinutes, durationMinutes, statusId]
+      `INSERT INTO auction (product_id, seller_id, start_price, current_price, bid_increment, start_time, end_time, status_id)
+       VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)`,
+      [productId, userId, startPrice, startPrice, bidIncrement, new Date(b.endTime || Date.now() + durationMinutes * 60 * 1000), statusId]
     );
+
+    // Notify admins about new auction pending approval
+    const [admins] = await pool.execute(
+      `SELECT id FROM user WHERE role_id = (SELECT id FROM role WHERE name = 'admin') LIMIT 1`
+    );
+    
+    const productTitle = b.title || b.name;
+    for (const admin of admins) {
+      await pool.execute(
+        `INSERT INTO notification (user_id, title, message, auction_id) VALUES (?, ?, ?, ?)`,
+        [admin.id, 'Yêu cầu kiểm duyệt đấu giá mới', `Người dùng vừa tạo phiên đấu giá mới "${productTitle}" cần được phê duyệt.`, r.insertId]
+      );
+    }
+
+    // Emit socket event for real-time updates (new auction pending)
+    if (global.io) {
+      global.io.emit('auction-created', { auctionId: r.insertId, statusId: 5 });
+    }
 
     const [rows] = await pool.execute(
       `SELECT a.*,
@@ -206,7 +244,12 @@ router.post('/auctions', async (req, res) => {
        WHERE a.id = ?`,
       [r.insertId]
     );
-    res.status(201).json(mapAuctionRow(rows[0]));
+    
+    const auction = mapAuctionRow(rows[0]);
+    res.status(201).json({
+      ...auction,
+      message: 'Phiên đấu giá đã được tạo và đang chờ admin kiểm duyệt'
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: 'Không tạo được đấu giá' });

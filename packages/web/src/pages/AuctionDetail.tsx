@@ -11,15 +11,15 @@ import { auctionService } from '../services/auctionService';
 import type { Auction } from '../types/auction';
 import { parseAuction } from '../lib/normalize';
 import { ApiError } from '../lib/api';
+import { addSyncEventListener } from '../lib/syncStorage';
 import { joinAuction, leaveAuction, onBidUpdate } from '../lib/socket';
-
 export function AuctionDetail() {
   const { id } = useParams();
   const [auction, setAuction] = useState<Auction | null>(null);
   const [loading, setLoading] = useState(true);
   const [bidAmount, setBidAmount] = useState('');
   const [bidHistory, setBidHistory] = useState<
-    { id: string; auctionId: string; userId: string; userName: string; bidAmount: number; bidTime: string }[]
+    { amount: number; time: string; userLabel: string }[]
   >([]);
   const [historyLoading, setHistoryLoading] = useState(true);
 
@@ -36,7 +36,9 @@ export function AuctionDetail() {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   useEffect(() => {
@@ -52,24 +54,51 @@ export function AuctionDetail() {
         if (!cancelled) setHistoryLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
+  }, [id, auction?.currentBid]);
+
+  useEffect(() => {
+    const cleanup = addSyncEventListener((type) => {
+      if (type !== 'auctions') return;
+      if (!id) return;
+
+      auctionService
+        .getAuctionById(id)
+        .then(setAuction)
+        .catch(() => {});
+      auctionService
+        .getAuctionBidHistory(id)
+        .then(setBidHistory)
+        .catch(() => {});
+    });
+
+    return cleanup;
   }, [id]);
 
   useEffect(() => {
     if (!id) return;
     joinAuction(id);
-    return () => { leaveAuction(id); };
+    return () => {
+      leaveAuction(id);
+    };
   }, [id]);
 
   useEffect(() => {
     if (!id) return;
+
     const unsubscribe = onBidUpdate((payload) => {
       if (String(payload.auctionId) !== String(id)) return;
       if (payload.auction) {
         setAuction(parseAuction(payload.auction as Record<string, unknown>));
       }
-      auctionService.getAuctionBidHistory(id).then(setBidHistory).catch(() => {});
+      auctionService
+        .getAuctionBidHistory(id)
+        .then(setBidHistory)
+        .catch(() => {});
     });
+
     return unsubscribe;
   }, [id]);
 
@@ -103,11 +132,8 @@ export function AuctionDetail() {
     }).format(amount);
   };
 
-  const isActive = auction.statusId === 1;
-  const isEnded = auction.statusId === 2;
-
   const minNextBid =
-    auction.currentPrice > 0 ? auction.currentPrice + auction.bidIncrement : auction.startPrice;
+    auction.currentBid > 0 ? auction.currentBid + auction.minIncrement : auction.startingBid;
 
   const handleBid = async () => {
     const amount = parseFloat(bidAmount);
@@ -151,14 +177,6 @@ export function AuctionDetail() {
     return d.toLocaleString('vi-VN');
   };
 
-  const statusBadgeClass = isActive
-    ? 'bg-success text-success-foreground'
-    : isEnded
-    ? 'bg-muted text-muted-foreground'
-    : 'bg-warning text-warning-foreground';
-
-  const statusText = isActive ? 'Đang diễn ra' : isEnded ? 'Đã kết thúc' : 'Đã hủy';
-
   return (
     <div className="bg-background">
       <div className="border-b border-border bg-card">
@@ -178,8 +196,20 @@ export function AuctionDetail() {
             <div className="relative aspect-square bg-card rounded-2xl overflow-hidden border border-border">
               <img src={auction.image} alt={auction.title} className="w-full h-full object-cover" />
               <div className="absolute top-4 left-4">
-                <Badge className={statusBadgeClass}>
-                  {statusText}
+                <Badge
+                  className={
+                    auction.status === 'active'
+                      ? 'bg-success text-success-foreground'
+                      : auction.status === 'upcoming'
+                        ? 'bg-warning text-warning-foreground'
+                        : 'bg-muted text-muted-foreground'
+                  }
+                >
+                  {auction.status === 'active'
+                    ? 'Đang diễn ra'
+                    : auction.status === 'upcoming'
+                      ? 'Sắp diễn ra'
+                      : 'Đã kết thúc'}
                 </Badge>
               </div>
             </div>
@@ -200,12 +230,12 @@ export function AuctionDetail() {
               <div>
                 <div className="text-sm text-muted-foreground mb-1">Giá hiện tại</div>
                 <div className="text-4xl font-bold text-accent">
-                  {auction.currentPrice > 0
-                    ? formatCurrency(auction.currentPrice)
-                    : formatCurrency(auction.startPrice)}
+                  {auction.currentBid > 0
+                    ? formatCurrency(auction.currentBid)
+                    : formatCurrency(auction.startingBid)}
                 </div>
               </div>
-              {isActive && (
+              {auction.status === 'active' && (
                 <div className="flex items-center gap-1 text-success">
                   <Flame className="h-5 w-5" />
                   <span className="text-sm font-semibold">{auction.totalBids} lượt</span>
@@ -213,19 +243,19 @@ export function AuctionDetail() {
               )}
             </div>
 
-            {isActive && (
+            {auction.status === 'active' && (
               <div className="bg-urgent/5 border border-urgent/20 rounded-xl p-6">
                 <div className="flex items-center gap-2 mb-3">
                   <Clock className="h-5 w-5 text-urgent" />
                   <span className="font-semibold text-foreground">Thời gian còn lại</span>
                 </div>
-                <CountdownTimer endTime={new Date(auction.endTime)} />
+                <CountdownTimer endTime={auction.endTime} />
               </div>
             )}
 
             <Separator />
 
-            {isActive && (
+            {auction.status === 'active' && (
               <div className="space-y-4">
                 <div>
                   <label className="text-sm font-semibold mb-2 block">Đặt giá của bạn</label>
@@ -236,7 +266,7 @@ export function AuctionDetail() {
                       value={bidAmount}
                       onChange={(e) => setBidAmount(e.target.value)}
                       min={minNextBid}
-                      step={auction.bidIncrement}
+                      step={auction.minIncrement}
                       className="h-14 text-lg"
                     />
                     <Button
@@ -256,24 +286,48 @@ export function AuctionDetail() {
                 <div>
                   <label className="text-sm font-semibold mb-2 block">Đặt giá nhanh</label>
                   <div className="grid grid-cols-2 gap-3">
-                    <Button variant="outline" onClick={() => handleQuickBid(minNextBid)} className="h-12">
+                    <Button
+                      variant="outline"
+                      onClick={() => handleQuickBid(minNextBid)}
+                      className="h-12"
+                    >
                       {formatCurrency(minNextBid)}
                     </Button>
-                    <Button variant="outline" onClick={() => handleQuickBid(minNextBid + auction.bidIncrement)} className="h-12">
-                      {formatCurrency(minNextBid + auction.bidIncrement)}
+                    <Button
+                      variant="outline"
+                      onClick={() => handleQuickBid(minNextBid + auction.minIncrement)}
+                      className="h-12"
+                    >
+                      {formatCurrency(minNextBid + auction.minIncrement)}
                     </Button>
-                    <Button variant="outline" onClick={() => handleQuickBid(minNextBid + auction.bidIncrement * 2)} className="h-12">
-                      {formatCurrency(minNextBid + auction.bidIncrement * 2)}
+                    <Button
+                      variant="outline"
+                      onClick={() => handleQuickBid(minNextBid + auction.minIncrement * 2)}
+                      className="h-12"
+                    >
+                      {formatCurrency(minNextBid + auction.minIncrement * 2)}
                     </Button>
-                    <Button variant="outline" onClick={() => handleQuickBid(minNextBid + auction.bidIncrement * 5)} className="h-12">
-                      {formatCurrency(minNextBid + auction.bidIncrement * 5)}
+                    <Button
+                      variant="outline"
+                      onClick={() => handleQuickBid(minNextBid + auction.minIncrement * 5)}
+                      className="h-12"
+                    >
+                      {formatCurrency(minNextBid + auction.minIncrement * 5)}
                     </Button>
                   </div>
                 </div>
               </div>
             )}
 
-            {isEnded && (
+            {auction.status === 'upcoming' && (
+              <div className="bg-warning/10 border border-warning/20 rounded-xl p-6">
+                <p className="text-warning-foreground font-semibold">
+                  Phiên đấu giá này chưa bắt đầu. Vui lòng quay lại sau.
+                </p>
+              </div>
+            )}
+
+            {auction.status === 'ended' && (
               <div className="bg-muted border border-border rounded-xl p-6">
                 <p className="text-muted-foreground font-semibold">
                   Phiên đấu giá này đã kết thúc.
@@ -294,7 +348,7 @@ export function AuctionDetail() {
                   </div>
                   <div>
                     <div className="text-xs text-muted-foreground">Người bán</div>
-                    <div className="font-semibold">{auction.seller || auction.sellerName || '—'}</div>
+                    <div className="font-semibold">{auction.seller}</div>
                   </div>
                 </div>
 
@@ -304,7 +358,7 @@ export function AuctionDetail() {
                   </div>
                   <div>
                     <div className="text-xs text-muted-foreground">Bước giá</div>
-                    <div className="font-semibold">{formatCurrency(auction.bidIncrement)}</div>
+                    <div className="font-semibold">{formatCurrency(auction.minIncrement)}</div>
                   </div>
                 </div>
 
@@ -314,7 +368,7 @@ export function AuctionDetail() {
                   </div>
                   <div>
                     <div className="text-xs text-muted-foreground">Giá khởi điểm</div>
-                    <div className="font-semibold">{formatCurrency(auction.startPrice)}</div>
+                    <div className="font-semibold">{formatCurrency(auction.startingBid)}</div>
                   </div>
                 </div>
 
@@ -325,7 +379,7 @@ export function AuctionDetail() {
                   <div>
                     <div className="text-xs text-muted-foreground">Kết thúc</div>
                     <div className="font-semibold">
-                      {new Date(auction.endTime).toLocaleString('vi-VN', {
+                      {auction.endTime.toLocaleDateString('vi-VN', {
                         day: '2-digit',
                         month: '2-digit',
                         year: 'numeric',
@@ -340,7 +394,7 @@ export function AuctionDetail() {
           </div>
         </div>
 
-        {bidHistory.length > 0 && (
+        {auction.status === 'active' && auction.totalBids > 0 && (
           <div className="mt-16">
             <h2 className="text-2xl font-bold mb-6">Lịch sử đặt giá</h2>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -350,7 +404,7 @@ export function AuctionDetail() {
                 <div className="divide-y divide-border">
                   {bidHistory.map((bid, index) => (
                     <div
-                      key={`${bid.bidTime}-${index}`}
+                      key={`${bid.time}-${index}`}
                       className="flex items-center justify-between p-4 hover:bg-accent/5 transition-colors"
                     >
                       <div className="flex items-center gap-3">
@@ -358,15 +412,15 @@ export function AuctionDetail() {
                           <User className="h-5 w-5 text-accent" />
                         </div>
                         <div>
-                          <div className="font-semibold">{bid.userName || `Người dùng #${bid.userId}`}</div>
+                          <div className="font-semibold">{bid.userLabel}</div>
                           <div className="text-sm text-muted-foreground">
-                            {formatBidTime(bid.bidTime)}
+                            {formatBidTime(bid.time)}
                           </div>
                         </div>
                       </div>
                       <div className="text-right">
                         <div className="text-xl font-bold text-accent">
-                          {formatCurrency(bid.bidAmount)}
+                          {formatCurrency(bid.amount)}
                         </div>
                         {index === 0 && (
                           <Badge variant="default" className="bg-success">

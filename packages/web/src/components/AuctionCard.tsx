@@ -18,19 +18,26 @@ export function AuctionCard({ auction }: AuctionCardProps) {
     }).format(amount);
   };
 
-  const isActive = auction.statusId === 1;
-  const isEnded = auction.statusId === 2;
-
-  const statusText = isActive ? 'Đang diễn ra' : isEnded ? 'Đã kết thúc' : 'Đã hủy';
-  const statusClass = isActive ? 'bg-green-600' : isEnded ? 'bg-gray-600' : 'bg-gray-400';
-
   return (
     <Card className="overflow-hidden hover:shadow-lg transition-shadow">
       <div className="relative aspect-[4/3] overflow-hidden">
         <img src={auction.image} alt={auction.title} className="w-full h-full object-cover" />
         <div className="absolute top-2 left-2">
-          <Badge className={statusClass}>
-            {statusText}
+          <Badge
+            variant={auction.status === 'active' ? 'default' : 'secondary'}
+            className={
+              auction.status === 'active'
+                ? 'bg-green-600'
+                : auction.status === 'upcoming'
+                  ? 'bg-blue-600'
+                  : 'bg-gray-600'
+            }
+          >
+            {auction.status === 'active'
+              ? 'Đang diễn ra'
+              : auction.status === 'upcoming'
+                ? 'Sắp diễn ra'
+                : 'Đã kết thúc'}
           </Badge>
         </div>
         <div className="absolute top-2 right-2">
@@ -46,9 +53,9 @@ export function AuctionCard({ auction }: AuctionCardProps) {
           <div className="flex justify-between items-center">
             <span className="text-sm text-gray-600">Giá hiện tại</span>
             <span className="font-bold text-blue-600">
-              {auction.currentPrice > 0
-                ? formatCurrency(auction.currentPrice)
-                : formatCurrency(auction.startPrice)}
+              {auction.currentBid > 0
+                ? formatCurrency(auction.currentBid)
+                : formatCurrency(auction.startingBid)}
             </span>
           </div>
 
@@ -59,16 +66,16 @@ export function AuctionCard({ auction }: AuctionCardProps) {
             </div>
             <div className="flex items-center gap-1">
               <TrendingUp className="h-4 w-4" />
-              <span>+{formatCurrency(auction.bidIncrement)}</span>
+              <span>+{formatCurrency(auction.minIncrement)}</span>
             </div>
           </div>
         </div>
       </CardContent>
 
       <CardFooter className="p-4 pt-0 flex justify-between items-center">
-        <CountdownTimer endTime={new Date(auction.endTime)} compact />
+        <CountdownTimer endTime={auction.endTime} compact />
         <Link to={`/auctions/${auction.id}`}>
-          <Button size="sm">{isActive ? 'Đặt giá' : 'Xem chi tiết'}</Button>
+          <Button size="sm">{auction.status === 'active' ? 'Đặt giá' : 'Xem chi tiết'}</Button>
         </Link>
       </CardFooter>
     </Card>
